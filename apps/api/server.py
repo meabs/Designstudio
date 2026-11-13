@@ -1,5 +1,5 @@
 from html.parser import HTMLParser
-import secrets, hmac, random, base64, os, json, sqlite3, uuid, hashlib, threading, time, re, html, zipfile, io, subprocess, shlex, shutil
+import copy, secrets, hmac, random, base64, os, json, sqlite3, uuid, hashlib, threading, time, re, html, zipfile, io, subprocess, shlex, shutil
 from pathlib import Path
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler, BaseHTTPRequestHandler
@@ -78,7 +78,7 @@ def fixture_tokens(ctx):
  # Deliberately small, explicit fixture vocabulary; not a general language model.
  tokens=dict(ctx['tokens'])
  colors={'pink':'#db2777','red':'#dc2626','blue':'#2563eb','green':'#15803d','purple':'#7c3aed','black':'#111111','white':'#ffffff','orange':'#c2410c'}
- instructions=[ctx.get('markdown','')]+[r.get('description','') for r in ctx.get('effective_rules',[]) if r.get('enabled',True)]
+ instructions=[ctx.get('markdown',''),ctx.get('run_overrides',{}).get('prose','')]+[r.get('description','') for r in ctx.get('effective_rules',[]) if r.get('enabled',True)]
  for text in instructions:
   for match in re.finditer(r'(?:use\s+)?(#[0-9a-f]{6}\b|pink|red|blue|green|purple|black|white|orange)\s+(text|background|buttons?)\b|(?:text|background|buttons?)\s+(?:colou?r\s+)?(?:should\s+be|must\s+be|is|:|=)\s*(#[0-9a-f]{6}\b|pink|red|blue|green|purple|black|white|orange)\b',text,re.I):
    if re.search(r"(?:don't|do not|never|avoid|not)\s+(?:use\s+)?$",text[max(0,match.start()-35):match.start()],re.I): continue
@@ -252,9 +252,35 @@ def run_cli(command,out,timeout,j,runner=None):
    if time.time()-start>timeout: proc.kill(); proc.wait(); raise subprocess.TimeoutExpired(command,timeout)
    time.sleep(.2)
  return proc.returncode
+IGNORE_RE=re.compile(r"not followed|ignored|did not (?:follow|use|view|open|apply)|didn't (?:follow|use|view|open|apply)|never opened|skipped|omitted|left out|could not honou?r|conflicts? with|declined|did not include",re.I)
+SOURCE_RE=re.compile(r"brief|reference|mood ?board|sketch|woodcut|note|image",re.I)
+NOT_VIEWED_RE=re.compile(r"(?:did not|didn't|never|not|haven't|have not)\s+(?:\w+\s+){0,2}(?:view|viewed|open|opened|look(?:ed)? at|examine[d]?|inspect(?:ed)?|see|seen)[^.\n]{0,60}(?:reference|image|mood ?board|sketch)|(?:reference|image)s?[^.\n]{0,40}(?:not (?:viewed|opened|examined)|unviewed)",re.I)
+VIEWED_RE=re.compile(r"\b(?:viewed|opened|looked at|examined|inspected|studied)\b[^.\n]{0,60}(?:reference|image|mood ?board|sketch)",re.I)
+def parse_agent_report(log_text,has_refs):
+ # The agent's closing message, parsed for what it says it did not follow. A self-report: unverified, never used for pass/fail.
+ lines=[l for l in log_text.splitlines() if not re.match(r'\s*(SessionEnd hook|hook:|tokens used|[\d,]+\s*$)',l)]
+ tail='\n'.join(lines)[-2400:].strip()
+ half=tail[len(tail)//2:] if tail.count('Created the static package')>1 else tail
+ ignored=[re.sub(r'^[\s\-*]+','',l).strip() for l in half.splitlines() if IGNORE_RE.search(l) and SOURCE_RE.search(l)][:8]
+ viewed=None
+ if has_refs: viewed=False if NOT_VIEWED_RE.search(half) else (True if VIEWED_RE.search(half) else None)
+ return dict(text=half[-1800:],ignored=ignored,viewed_references=viewed)
+def record_report(j):
+ try:
+  jd=get(j['id']); logp=STORE/'jobs'/j['id']/'runner.log'
+  if jd.get('runner_id') is None or not logp.is_file(): return
+  r=parse_agent_report(logp.read_text(errors='replace'),bool(jd.get('references')))
+  if not r['text']: return
+  jd['agent_report']=r; save('job',jd)
+  if jd.get('variant_id') and (r['ignored'] or r['viewed_references'] is False):
+   v=get(jd['variant_id']); ev=' | '.join(r['ignored'][:4]) or 'Agent says it did not view the reference images'
+   if r['viewed_references'] is False and 'did not view' not in ev: ev+=' | Agent says it did not view the reference images'
+   v.setdefault('validation',[]).append(dict(check='Agent self-report: parts of the brief or references not followed (unverified)',outcome='review',evidence=ev[:700])); save('variant',v)
+ except Exception: pass
 def execute(j):
  try: check_cancel(j); _execute(j)
  except Cancelled: event(j,'cancelled','Cancelled by designer; no variation was saved')
+ finally: record_report(j)
 # ---- durable queue: job state lives in SQLite; this in-memory queue only holds IDs and is rebuilt from the database on start ----
 import queue
 JOBQ=queue.Queue(); WORKERS=[]
@@ -582,7 +608,7 @@ def mask_state(state):
    for c in v.get('validation',[]):
     if c['check']=='Fixture guidance support': c.update(check='Guidance support',evidence='Some prose guidance may not be applied automatically; needs designer review.')
  for j in state['job']:
-  if j.get('board_id') in hidden: j['runner_name']='Hidden (blind)'; j['runner_id']=None
+  if j.get('board_id') in hidden: j['runner_name']='Hidden (blind)'; j['runner_id']=None; j.pop('agent_report',None)
  for p in state['prototype']:
   if p.get('board_id') in hidden: p['runner_name']='Hidden (blind)'
  return state
@@ -617,9 +643,45 @@ def create_board(data):
   board.update(research_id=research['id'],research_brief=research['brief'],research_findings=findings,research_sources=research.get('sources',[]))
  return save('board',board)
 
+def job_context(ctx,ov):
+ # Per-run overrides: a copy of the saved context with extra/replacement/suspended rules and run-only prose. Never saved to the project.
+ ov=ov if isinstance(ov,dict) else {}
+ rules=[dict(id=str(r.get('id','')).strip(),description=str(r.get('description','')).strip(),scope='job',severity=r.get('severity','error'),verification=r.get('verification','advisory'),**{k:r[k] for k in ('check','parameters') if k in r},justification=str(r.get('justification','')).strip() or 'Run-only override',enabled=True) for r in ov.get('rules',[]) if isinstance(r,dict) and str(r.get('id','')).strip() and str(r.get('description','')).strip()]
+ suspend=[str(i) for i in ov.get('suspend',[]) if str(i).strip()]; prose=str(ov.get('prose','')).strip()
+ if not (rules or suspend or prose): return ctx
+ c=copy.deepcopy(ctx); eff={r['id']:r for r in c['effective_rules']}; extra=[]
+ for r in rules:
+  if r['id'] in eff: extra.append({'id':r['id'],'superseded':eff[r['id']],'winner':r,'justification':r['justification']})
+  eff[r['id']]=r
+ for i in suspend:
+  if i in eff: extra.append({'id':i,'superseded':eff.pop(i),'winner':None,'justification':'Suspended for this run only'})
+ c['effective_rules']=list(eff.values()); c['overrides']=c.get('overrides',[])+extra; c['run_overrides']=dict(rules=rules,suspend=suspend,prose=prose)
+ c['hash']=digest({'markdown':c['markdown'],'tokens':c['tokens'],'effective_rules':c['effective_rules'],'run_prose':prose}); return c
+CONFLICT_PATTERNS=[
+ ('actions',re.compile(r"\b(?:two|three|four|five|[2-5])\b[^.\n]{0,40}\b(?:equal|same|co-?equal|competing)\b[^.\n]{0,30}\b(?:actions?|buttons?|ctas?|doors?|paths?|choices?|options?)\b|no (?:single )?primary (?:button|action)",re.I),re.compile(r"(?:one|single|1|max(?:imum)?)\b[^.\n]{0,25}primary|primary[^.\n]{0,20}(?:one|single|only)",re.I),'asks for several equal actions'),
+ ('imagery',re.compile(r"illustrat|woodcut|hand[- ]?drawn|mascot|cartoon|whimsical|decorative|texture|photograph",re.I),re.compile(r"illustrat|decorat|imagery|stock|photograph|ornament|visual",re.I),'asks for expressive imagery'),
+ ('voice',re.compile(r"in (?:its|their|a) own voice|playful|quirky|character voice|speaks as|first[- ]person|humou?r|jokes?|riddle",re.I),re.compile(r"tone|voice|neutral|professional|humou?r|whims",re.I),'asks for a distinctive voice'),
+ ('motion',re.compile(r"animat|parallax|motion|video|autoplay|carousel",re.I),re.compile(r"animat|motion|static|reduce|carousel",re.I),'asks for motion'),
+ ('urgency',re.compile(r"countdown|urgen|scarcity|limited time|only \d+ left|hurry",re.I),re.compile(r"urgen|pressure|dark pattern|manipulat|transparen|trust",re.I),'asks for urgency')]
+def conflict_preview(project_id,brief,overrides=None,reference_ids=None):
+ # Advisory only: keyword heuristics comparing the brief, run-only prose and selected reference notes with the active rules. It cannot read images.
+ ctx=job_context(get(get(project_id)['context_id']),overrides); refs=resolve_references(project_id,[i for i in (reference_ids or []) if any(r['id']==i for r in allof('reference'))])
+ sources=[('your brief',brief or '')]+[('reference '+r['name'],r.get('note','')+' '+r['name']) for r in refs]
+ if ctx.get('run_overrides',{}).get('prose'): sources.append(('run-only prose (applies, but check it)',ctx['run_overrides']['prose']))
+ out=[]; run_ids={x['id'] for x in ctx.get('run_overrides',{}).get('rules',[])}
+ for key,ask,rule_re,label in CONFLICT_PATTERNS:
+  hits=[(w,m[0]) for w,t in sources if (m:=ask.search(t))]
+  if not hits: continue
+  for r in ctx['effective_rules']:
+   if rule_re.search(r['id']+' '+r['description']) and not any(o['id']==r['id'] for o in out):
+    out.append(dict(id=r['id'],rule=r['description'],severity=r.get('severity','error'),overridden=r['id'] in run_ids,topic=key,message=f"{' and '.join(sorted({w for w,_ in hits}))} {label} (\u201c{hits[0][1][:60]}\u201d), but {r['id']} says \u201c{r['description'][:90]}\u201d.",action='Already overridden for this run' if r['id'] in run_ids else 'Agents treat rules as hard constraints and usually follow the rule, not the brief. Override it for this run, or accept the trade-off.'))
+ return out
 def launch(data,kind,project_id):
  if kind=='research' and not str(data.get('brief','')).strip(): raise ValueError('Enter a research question first')
  p=get(project_id); ctx=get(p['context_id']); key=data.get('idempotency_key')
+ parent_job=next((j for j in allof('job') if j.get('variant_id')==data.get('parent_id')),None) if data.get('parent_id') else None
+ ov=data['overrides'] if 'overrides' in data else ((parent_job or {}).get('context',{}).get('run_overrides'))
+ ctx=job_context(ctx,ov)
  if key:
   existing=[j for j in allof('job') if j.get('key')==key and j['project_id']==project_id]
   if existing: return existing
@@ -660,8 +722,9 @@ def launch(data,kind,project_id):
   j=dict(id=uid(),project_id=project_id,type=kind,runner_id=runner_id,runner_name=get(runner_id).get('name',''),status='queued',events=[],created_at=time.time(),input_hash=shared,key=key,**common)
   scope_text=('\nRevision scope (strict): '+'; '.join((f'screen {sid}: change ONLY the element(s) with data-design-id in {sc["elements"]} and their descendants, keep every other byte of that file identical' if sc['mode']=='region' else f'screen {sid}: you may change the whole screen') for sid,sc in scope.items())+'; all other screens must be copied unchanged.') if scope else ''
   refs_text=('\nReference images (designer-supplied visual context; files in references/). Treat them as inspiration or constraints, not verified brand rules; the guidelines above take precedence unless a note says otherwise:\n'+'\n'.join(f'- references/{r["file"]} · {r["name"]}'+(f' · note: {r["note"]}' if r['note'] else '') for r in references)) if references else ''
+  run_text=('\nRUN-ONLY EXPERIMENT BRIEF FROM THE DESIGNER (this run only; where it conflicts with DESIGN.md prose or the rules below, THIS TAKES PRECEDENCE, and rules listed here already replace or suspend the saved ones):\n'+ctx['run_overrides']['prose']) if ctx.get('run_overrides',{}).get('prose') else ''
   if blind_labels: j['blind_label']=blind_labels[0]
-  j['instruction']=f'Task: {kind}. Output contract: static variant-package/1.0 or research.json.\nBrief: {common["brief"]}\nScreens: {common.get("board",{}).get("screens",[])}\nDESIGN.md:\n{ctx["markdown"]}\nTokens: {canonical(ctx["tokens"])}\nRules: {canonical(ctx["effective_rules"])}\nSnapshot SHA256: {ctx["hash"]}\nFindings (unverified unless explicitly sourced): {canonical(common["findings"])}\nSupplied sources (preserve provenance): {canonical(common["sources"])}\nAnnotations: {canonical(common["annotations"])}{refs_text}{scope_text}\nYou are running non-interactively: do not ask questions, do not reply with only a plan or summary, and do not wait for confirmation. The task is only complete when the files exist. Only create these file types: .html .css .js .json .png .jpg .svg .woff .woff2 (plus optional .md/.txt notes). Write files to output/. Research output: research.json with a findings array (id,title,detail,confidence,source_ids) and an optional limitations array. Cite supplied sources only by their id; do not invent sources or URLs and do not label anything verified (the studio assigns provenance labels itself). State plainly what you could not check. Variant output: manifest.json with schema_version=1.0, kind=clickthrough-static, board_id, start_screen_id=0 (string), screens array with id as zero-based string, title, file=screens/<id>.html, states array; edges with from,to,trigger. All requested screens must exist. Use data-role=primary-action on primary controls and data-design-id on annotation targets. For a revision, output/ ALREADY CONTAINS a full copy of the parent version: edit those files in place and leave everything not covered by the revision scope untouched. No external dependencies. Enumerate files and any guidelines you could not honor; self-report is not validation.'
+  j['instruction']=f'Task: {kind}. Output contract: static variant-package/1.0 or research.json.\nBrief: {common["brief"]}\nScreens: {common.get("board",{}).get("screens",[])}\nDESIGN.md:\n{ctx["markdown"]}{run_text}\nTokens: {canonical(ctx["tokens"])}\nRules: {canonical(ctx["effective_rules"])}\nSnapshot SHA256: {ctx["hash"]}\nFindings (unverified unless explicitly sourced): {canonical(common["findings"])}\nSupplied sources (preserve provenance): {canonical(common["sources"])}\nAnnotations: {canonical(common["annotations"])}{refs_text}{scope_text}\nYou are running non-interactively: do not ask questions, do not reply with only a plan or summary, and do not wait for confirmation. The task is only complete when the files exist. Only create these file types: .html .css .js .json .png .jpg .svg .woff .woff2 (plus optional .md/.txt notes). Write files to output/. Research output: research.json with a findings array (id,title,detail,confidence,source_ids) and an optional limitations array. Cite supplied sources only by their id; do not invent sources or URLs and do not label anything verified (the studio assigns provenance labels itself). State plainly what you could not check. Variant output: manifest.json with schema_version=1.0, kind=clickthrough-static, board_id, start_screen_id=0 (string), screens array with id as zero-based string, title, file=screens/<id>.html, states array; edges with from,to,trigger. All requested screens must exist. Use data-role=primary-action on primary controls and data-design-id on annotation targets. For a revision, output/ ALREADY CONTAINS a full copy of the parent version: edit those files in place and leave everything not covered by the revision scope untouched. No external dependencies. Enumerate files and any guidelines you could not honor; self-report is not validation.'
   save('job',j); jobs.append(j); snapshot_references(j,STORE/'projects'/project_id/'references'); enqueue(j)
  if kind=='generate_board' and board_for_refs is not None and 'reference_ids' in data: board_for_refs['reference_ids']=[r['id'] for r in references]; save('board',board_for_refs)
  for a in annotations:
@@ -800,6 +863,7 @@ class Handler(SimpleHTTPRequestHandler):
     r=get(d['id']); r.update({k:str(d[k])[:500 if k=='note' else 80] for k in ['name','note'] if k in d}); result=save('reference',r)
    elif action=='reference-delete': result=delete_reference(d['id'])
    elif action=='board-blind': result=set_blind(d['board_id'],d.get('blind',True))
+   elif action=='conflict-preview': result=conflict_preview(d['project_id'],d.get('brief',''),d.get('overrides'),d.get('reference_ids'))
    elif action=='blind-choice': result=blind_choice(d['board_id'],d.get('variant_id'),d.get('reason',''))
    elif action=='mix': result=mix_variants(d['board_id'],d.get('picks'))
    elif action=='share-create': result=share_create(d['prototype_id'],d.get('hours'))

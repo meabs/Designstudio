@@ -30,6 +30,16 @@ Enter a question and optional sources (one URL or excerpt per line). Findings wi
 - **Compare** – pick any two versions; the filmstrip switches screens; changed screens are flagged.
 - **Review** – with the comment tool, click the screen to drop a bubble pin (click a pin to open its thread popover), tick pins to include, **Revise selection**. For a revision, toggle Before/After or open side by side. Use **Add comment** or press Enter on the screen for keyboard-only pin placement (position is editable).
 
+## Experimenting against your own rules
+
+Agents treat the rules as hard constraints and will usually follow a rule over your brief, without saying so up front. When you want an agent to break a convention on purpose:
+
+1. Open **Generate variants**. As you type the brief, a *Heads-up* box lists active rules your brief, run-only prose or reference notes seem to contradict (for example "three equal actions" against CTA-001). It is keyword-based and advisory; it cannot read images.
+2. Open **Experiment for this run only**. Write a run-only brief (it is placed above DESIGN.md and stated to take precedence), and for each rule choose Keep, Suspend or Replace, or add a new rule.
+3. Generate. The overrides are stored on those jobs only, are part of the shared input hash so every runner gets identical input, and are **not** saved into the project guidelines. A revision of one of those variants inherits its overrides.
+
+After a run, the variant inspector's Design tab shows the run-only overrides and an **Agent self-report (unverified)**: whether the agent says it viewed the reference images, and any line where it says it did not follow part of the brief or references. A designer-review check is added when it does. The studio has not verified any of it. While a board is blind the self-report is hidden.
+
 ## Checks
 Deterministic checks show their evidence. They never claim accessibility, brand or visual conformance. “Needs designer review” items stay open until you mark them.
 

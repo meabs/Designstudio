@@ -209,6 +209,24 @@ await step('blind A/B: identities hidden in UI and API until a choice, then reve
   await page.locator('.blindbar.revealed').waitFor(); assert.match(await page.locator('.blindbar.revealed').textContent(), /You preferred Option [A-Z], which was (Studio|Exploration)/);
   const b = (await api('state')).board.find(x => x.id === nb.id); assert.ok(b.revealed && b.blind_choice.reason === 'clearer'); assert.ok((await api('state')).variant.some(v => names.includes(v.runner_name)), 'names visible after reveal');
 });
+await step('per-job experiment overrides: conflict preview, run-only prose, nothing saved to the project', async () => {
+  const before = (await api('state')); const ctxBefore = before.project.find(x => x.id === project.id).context_id, nCtx = before.context.length;
+  await page.goto(`${origin}/projects/${project.id}/boards/${board.id}`); await page.locator('[data-action="generate"]').first().click();
+  await page.locator('#g-brief').fill('Show three equal action buttons on the first screen');
+  await page.locator('#conflicts .conflict.warn').first().waitFor(); assert.match(await page.locator('#conflicts').textContent(), /CTA-001/);
+  await page.locator('details.exp > summary').click(); await page.locator('#g-prose').fill('EXPERIMENT: three equal doors, playful voice');
+  await page.locator('select[name="mode:CTA-001"]').selectOption('replace'); await page.locator('input[name="text:CTA-001"]').fill('Up to three equal actions on the entry screen');
+  await page.waitForFunction(() => ![...document.querySelectorAll('#conflicts .conflict.warn')].some(e => e.textContent.includes('CTA-001')), null, { timeout: 5000 }); // replacing the rule resolves the warning
+  const fx = (await api('state')).runner.filter(r => r.type === 'fixture'); for (const r of fx) { const cb = page.locator(`input[name="runners"][value="${r.id}"]`); if (!(await cb.isChecked())) await cb.check(); }
+  await page.locator('#modal-form button.primary').click(); await page.locator('#dialog').waitFor({ state: 'hidden' });
+  const st = await api('state'); const jobs = st.job.filter(j => j.board_id === board.id && j.context?.run_overrides?.prose); assert.ok(jobs.length >= 2);
+  for (const j of jobs) { assert.match(j.instruction, /RUN-ONLY EXPERIMENT BRIEF/); assert.equal(j.context.effective_rules.find(r => r.id === 'CTA-001').description, 'Up to three equal actions on the entry screen'); }
+  assert.equal(new Set(jobs.map(j => j.input_hash)).size, 1);
+  assert.equal(st.project.find(x => x.id === project.id).context_id, ctxBefore); assert.equal(st.context.length, nCtx, 'overrides must not create project context versions');
+  await until(async () => (await api('state')).variant.filter(v => jobs.some(j => j.id === v.job_id)).length >= 2, 'override variants');
+  const ov = (await api('state')).variant.find(v => jobs.some(j => j.id === v.job_id)); await page.goto(`${origin}/projects/${project.id}/boards/${board.id}/review/${ov.id}`); await page.locator('#pin-area img').waitFor();
+  await page.getByText('Run-only experiment overrides').first().waitFor();
+});
 await step('boards list, archive & restore', async () => {
   await page.goto(`${origin}/projects/${project.id}/boards`); await page.getByRole('heading', { name: 'Boards', exact: true }).waitFor(); assert.ok(await page.locator('.project-card').count() >= 1);
 });

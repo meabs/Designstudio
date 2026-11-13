@@ -1,6 +1,6 @@
 import { esc, icon, badge, renderMarkdown } from './lib.js';
 import { S, route, nav, boardPath, live, img, protoLive, runnerOf, enabledRunners, current, checksOf, unresolvedReviews, prototypeOf, signature, variantsOf } from './store.js';
-import { page, ensureDraft, isDirty, overrideList, renderResearchResults, runnerOptions, playerInfo, tokenPanel, refPicker } from './views.js';
+import { page, ensureDraft, isDirty, overrideList, conflictList, renderResearchResults, runnerOptions, playerInfo, tokenPanel, refPicker } from './views.js';
 import { findingsForHandoff, researchJobs, boardResearch, parseSources } from './research.js';
 
 const $ = s => document.querySelector(s);
@@ -134,11 +134,30 @@ function generateModal() {
   modal('Generate independent variants', `<p class="muted">Every runner receives the same brief and the same immutable context snapshot, and cannot see the others’ output.</p>
   <div class="inline-note">Context <strong>v${ctx.version || '?'}</strong> · <span class="mono">${esc(ctx.hash.slice(0, 8))}</span> · ${ctx.effective_rules.length} effective rules (${det} deterministic, ${ctx.effective_rules.length - det} for designer review)${found ? ` · ${found} research findings included` : ''}${dirty ? '<br><strong>Unsaved guideline edits are not included.</strong> Save a version first.' : ''}</div>
   ${ctx.overrides.length ? `<details open><summary>${ctx.overrides.length} rule override${ctx.overrides.length === 1 ? '' : 's'} in force</summary>${overrideList(ctx.overrides)}</details>` : ''}
-  <label for="g-brief">Board brief</label><textarea id="g-brief" name="brief" rows="3">${esc(b.brief)}</textarea><label>Reference images (optional)</label>${refPicker(new Set(b.reference_ids || []), ctx.project_id)}<label>Runner configurations · select at least two</label>${runnerChecklist()}<p class="tiny muted">Template fixtures apply tokens and simple colour directives. Choose a local coding agent for broader design rules. Configure agents in <a href="/settings/agents" style="color:#4f52c9">Settings → Agents</a>.</p>`, 'Generate variants', async f => {
+  <label for="g-brief">Board brief</label><textarea id="g-brief" name="brief" rows="3">${esc(b.brief)}</textarea><div id="conflicts" aria-live="polite"></div>
+  <details class="exp"><summary>Experiment for this run only</summary><p class="tiny muted">Layered above DESIGN.md and the rules for these jobs only. Recorded on each job, never saved to the project guidelines.</p>
+  <label for="g-prose">Run-only brief (takes precedence over DESIGN.md prose)</label><textarea id="g-prose" name="prose" rows="3" placeholder="e.g. Experiment: ignore the calm tone; use three equal doors and a hand-drawn voice."></textarea>
+  <label>Rules for this run</label>${ctx.effective_rules.map(r => `<div class="row" style="align-items:flex-start;gap:8px"><select name="mode:${esc(r.id)}" aria-label="${esc(r.id)} for this run" style="width:auto"><option value="keep">Keep</option><option value="suspend">Suspend</option><option value="replace">Replace</option></select><div style="flex:1"><strong class="tiny">${esc(r.id)}</strong> <span class="tiny muted">${esc(r.description)}</span><input name="text:${esc(r.id)}" placeholder="Replacement wording" hidden></div></div>`).join('')}
+  <label>Add a rule for this run</label><div class="row"><input name="new-id" placeholder="ID, e.g. EXP-1"><input name="new-text" placeholder="Rule wording" style="flex:1"></div></details><label>Reference images (optional)</label>${refPicker(new Set(b.reference_ids || []), ctx.project_id)}<label>Runner configurations · select at least two</label>${runnerChecklist()}<p class="tiny muted">Template fixtures apply tokens and simple colour directives. Choose a local coding agent for broader design rules. Configure agents in <a href="/settings/agents" style="color:#4f52c9">Settings → Agents</a>.</p>`, 'Generate variants', async f => {
     const runners = f.getAll('runners'); if (runners.length < 2) throw Error('Select at least two runner configurations');
-    await api('generate', { project_id: ctx.project_id, board_id: b.id, brief: f.get('brief'), runner_ids: runners, reference_ids: f.getAll('references'), idempotency_key: key });
+    await api('generate', { project_id: ctx.project_id, board_id: b.id, brief: f.get('brief'), runner_ids: runners, reference_ids: f.getAll('references'), overrides: collectOverrides(f), idempotency_key: key });
     await refresh(false); go(boardPath(b)); toast('Independent jobs queued');
   });
+  wireConflicts(ctx);
+}
+function collectOverrides(f) {
+  const rules = [], suspend = [];
+  for (const [k, val] of f.entries()) if (k.startsWith('mode:')) { const id = k.slice(5); if (val === 'suspend') suspend.push(id); else if (val === 'replace' && String(f.get('text:' + id) || '').trim()) rules.push({ id, description: f.get('text:' + id), justification: 'Run-only experiment' }); }
+  if (String(f.get('new-id') || '').trim() && String(f.get('new-text') || '').trim()) rules.push({ id: f.get('new-id'), description: f.get('new-text'), justification: 'Run-only experiment' });
+  return { rules, suspend, prose: f.get('prose') || '' };
+}
+function wireConflicts(ctx) {
+  const form = $('#modal-form'); let timer;
+  const run = async () => {
+    const f = new FormData(form); form.querySelectorAll('select[name^="mode:"]').forEach(s => { const t = form.querySelector(`[name="${CSS.escape('text:' + s.name.slice(5))}"]`); if (t) t.hidden = s.value !== 'replace'; });
+    try { const ws = await api('conflict-preview', { project_id: ctx.project_id, brief: f.get('brief'), overrides: collectOverrides(f), reference_ids: f.getAll('references') }); $('#conflicts').innerHTML = ws.length ? `<div class="inline-note"><strong>Heads-up before you generate</strong> (advisory, keyword-based; it cannot read images)${conflictList(ws)}</div>` : ''; } catch { $('#conflicts').innerHTML = ''; }
+  };
+  form.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 350); }); form.addEventListener('change', run); run();
 }
 function approveModal() {
   const { v, b } = current(), checks = checksOf(v), failed = checks.filter(c => c.outcome === 'fail'), open = unresolvedReviews(v);

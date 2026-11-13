@@ -24,3 +24,4 @@ Persistent projects, archive/rename/restore, context versions and checksums, tok
 - Colour contrast was raised across muted text but has not been audited with an automated tool; keyboard navigation covers the main flows but has not had a screen-reader pass.
 
 The full build specification acceptance checklist has not been formally certified. This repository is a working implementation to extend.
+- Run-only overrides change what the agent is told, not what the studio checks beyond the rules you keep; a replaced rule is validated by its new wording only if it is deterministic. The agent self-report is parsed with regexes from free text, can miss or misread a line, and is unverified. The conflict preview is a keyword heuristic that cannot read reference images, so it has false positives and misses.
