@@ -36,5 +36,8 @@ Deterministic checks show their evidence. They never claim accessibility, brand 
 ## Prototype player
 Back/Forward, Restart, mock states (Default/Help/Error where the screen supports them), 1440/390 framing, Open in new tab, Export ZIP (extract and open `index.html`).
 
+## Sharing a prototype
+In the player, **Share** creates a read-only link (expires after 1 hour to 30 days, or never) and lists active links with **Copy** and **Revoke**. Start the studio with `STUDIO_SHARE_PORT=5180` to serve them; that port exposes only approved prototype bundles, never the studio. Links are plain HTTP and need no login, so treat them like unlisted URLs. On another device, replace `localhost` in the link with this computer's address.
+
 ## Settings → Agents
-Add local coding-agent configurations (model optional), rename, enable/disable, test or delete them. Fixtures always work offline. `STUDIO_MAX_JOBS` (default 3) limits concurrent jobs.
+Add local coding-agent configurations (model optional), rename, enable/disable, test or delete them. Each local agent also has the environment it may see, an **Automatic retries** limit (0 to 3) and, on Linux with bubblewrap, a **Filesystem sandbox** (on by default) that hides your home directory and other projects from the agent and lets it write only its own job folder. Fixtures always work offline. `STUDIO_MAX_JOBS` (default 3) limits concurrent jobs.

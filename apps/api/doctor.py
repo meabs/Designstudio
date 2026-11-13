@@ -39,7 +39,7 @@ def main():
     try: cfg = local_agents.configuration(a.agent, a.model)
     except ValueError as e: print('Cannot configure agent:', e); return 2
     cfg['timeout'] = a.timeout; runner = s.save('runner', dict(id=s.uid(), enabled=True, **cfg))
-    print(f"Agent: {cfg['name']}  executable: {cfg['executable']}\nEnvironment passed through: {', '.join(cfg['env_allowlist'])}\nStorage: {tmp.name} (temporary)")
+    print(f"Agent: {cfg['name']}  executable: {cfg['executable']}\nEnvironment passed through: {', '.join(cfg['env_allowlist'])}\nSandbox: {cfg.get('sandbox') or 'off'}  (read-only filesystem, home and studio storage hidden)\nStorage: {tmp.name} (temporary)")
     t = time.time(); j = s.launch(dict(board_id=b['id'], brief=b['brief'], runner_ids=[runner['id']]), 'generate_board', p['id'])[0]
     ok = report('baseline generation', wait(j['id'], a.timeout), t)
     if ok and a.guidance:

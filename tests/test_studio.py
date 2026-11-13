@@ -42,6 +42,10 @@ class StudioTest(unittest.TestCase):
  def test_local_adapter_uses_selected_model(self):
   with patch.object(local_agents,'discover',return_value=[{'id':'codex','name':'Codex','supported':True,'executable':'/usr/bin/codex'}]):
    c=local_agents.configuration('codex','chosen-model');self.assertIn('chosen-model',c['args']);self.assertNotIn('--dangerously-bypass-approvals-and-sandbox',c['args'])
+ def test_codex_confinement_follows_the_studio_sandbox_setting(self):
+  with patch.object(local_agents,'discover',return_value=[{'id':'codex','name':'Codex','supported':True,'executable':'/usr/bin/codex'}]):
+   on=local_agents.configuration('codex','',sandbox=True); off=local_agents.configuration('codex','',sandbox=False)
+  self.assertIn('danger-full-access',on['args']); self.assertEqual(on['sandbox'],'bwrap'); self.assertIn('workspace-write',off['args']); self.assertNotIn('danger-full-access',off['args']); self.assertIsNone(off['sandbox'])
  def test_no_installed_agent(self):
   with patch.object(local_agents,'discover',return_value=[]):
    with self.assertRaises(ValueError):local_agents.configuration('codex','model')

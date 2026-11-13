@@ -1,13 +1,14 @@
 from html.parser import HTMLParser
-import random, base64, os, json, sqlite3, uuid, hashlib, threading, time, re, html, zipfile, io, subprocess, shlex, shutil
+import secrets, hmac, random, base64, os, json, sqlite3, uuid, hashlib, threading, time, re, html, zipfile, io, subprocess, shlex, shutil
 from pathlib import Path
 from contextlib import contextmanager
-from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler, BaseHTTPRequestHandler
 from urllib.parse import urlparse
-from local_agents import discover, configuration
+from local_agents import discover, configuration, bwrap_ok
 ROOT=Path(__file__).resolve().parents[2]
 STORE=Path(os.environ.get('STUDIO_STORAGE', ROOT/'storage')); STORE.mkdir(parents=True,exist_ok=True)
 LOCK=threading.RLock()
+SHARE_PORT=int(os.environ.get('STUDIO_SHARE_PORT','0') or 0)
 def uid(): return uuid.uuid4().hex[:16]
 def canonical(x): return json.dumps(x,sort_keys=True,separators=(',',':'))
 def digest(x): return hashlib.sha256(canonical(x).encode()).hexdigest()
@@ -225,6 +226,20 @@ CANCEL=set(); MAX_JOBS=max(1,int(os.environ.get('STUDIO_MAX_JOBS','3')))
 class Cancelled(Exception): pass
 def check_cancel(j):
  if j['id'] in CANCEL: raise Cancelled()
+def sandbox_command(runner,command,jobdir):
+ # Filesystem sandbox (bubblewrap): everything read-only, home and the studio's storage hidden, only this job's folder writable.
+ # Agent install/auth directories are re-bound explicitly (see runner.sandbox_ro / sandbox_rw); the network stays available for model calls.
+ if not bwrap_ok(): raise ValueError('Sandbox is enabled for this runner but bubblewrap is not usable on this machine')
+ home=str(Path.home()); job=str(Path(jobdir).resolve()); store=str(STORE.resolve())
+ args=['bwrap','--ro-bind','/','/','--dev','/dev','--proc','/proc','--tmpfs','/tmp','--tmpfs',home,'--tmpfs',store]
+ for p in runner.get('sandbox_ro',[]): args+=['--ro-bind-try',os.path.expanduser(p),os.path.expanduser(p)]
+ for p in runner.get('sandbox_rw',[]): args+=['--bind-try',os.path.expanduser(p),os.path.expanduser(p)]
+ exe=runner.get('executable')
+ if exe and exe.startswith(home):
+  # The executable lives under the hidden home: recreate its symlink (or bind the file) so the sandbox can start it.
+  args+=['--symlink',os.readlink(exe),exe] if os.path.islink(exe) else ['--ro-bind-try',exe,exe]
+ args+=['--bind',job,job,'--unshare-pid','--unshare-ipc','--unshare-uts','--die-with-parent','--new-session','--chdir',job,'--']
+ return args+command
 DEFAULT_ENV_ALLOWLIST=['PATH','HOME','USER','LANG','LC_ALL','TERM','TMPDIR','SHELL']
 def runner_env(runner):
  return {k:os.environ[k] for k in runner.get('env_allowlist',DEFAULT_ENV_ALLOWLIST) if k in os.environ}
@@ -257,7 +272,7 @@ def worker():
   if jid is None: JOBQ.task_done(); return
   try:
    j=claim(jid)
-   if j: execute(j)
+   if j: execute(j); maybe_auto_retry(jid)
   except Exception: pass
   finally: JOBQ.task_done()
 def start_workers(n=None):
@@ -291,6 +306,7 @@ def _execute(j):
    if j.get('parent_id'):
     # Revisions start from a copy of the parent version, so the agent edits in place and untouched files stay identical.
     shutil.copytree(STORE/'variants'/j['parent_id'],out/'output',dirs_exist_ok=True,ignore=shutil.ignore_patterns('thumbnails','changes.json'))
+   if runner.get('sandbox')=='bwrap': command=sandbox_command(runner,command,out)
    if run_cli(command,out,min(int(runner.get('timeout',120)),600),j,runner): raise ValueError('CLI runner failed; see runner.log in the job history')
   time.sleep(.4); check_cancel(j)
   if j['type']=='research':
@@ -629,13 +645,76 @@ def launch(data,kind,project_id):
  for a in annotations:
   if kind=='revise_board': a=get(a['id']); a.update(status='applied',job_ids=[j['id'] for j in jobs]); save('annotation',a)
  return jobs
-def retry_job(job_id):
+def maybe_auto_retry(jid):
+ try:
+  j=get(jid)
+  if j['status'] not in ('failed','timed_out') or j.get('retried_by') or j['id'] in CANCEL or not j.get('runner_id'): return
+  runner=get(j['runner_id']); limit=int(runner.get('auto_retries',0)); attempt=int(j.get('attempt',1))
+  if attempt>limit: return
+  new=retry_job(jid,auto=(attempt+1,limit+1),defer=2*attempt)
+ except Exception: return
+def retry_job(job_id,auto=None,defer=0):
  old=get(job_id)
  if old['status'] not in ['failed','timed_out','cancelled']: raise ValueError('Only failed, timed-out or cancelled jobs can be retried')
  if old.get('retried_by'): raise ValueError('This job was already retried')
  fresh={k:v for k,v in old.items() if k not in ['id','status','events','variant_id','key','retried_by']}
- j=dict(fresh,id=uid(),status='queued',events=[],created_at=time.time(),key=None,retry_of=old['id']); snapshot_references(j,STORE/'jobs'/old['id']/'references'); old['retried_by']=j['id']; save('job',old); save('job',j)
- enqueue(j); return j
+ j=dict(fresh,id=uid(),status='queued',events=[dict(time=time.time(),message=f'Automatic retry: attempt {auto[0]} of {auto[1]}')] if auto else [],created_at=time.time(),key=None,retry_of=old['id'],attempt=int(old.get('attempt',1))+1,auto_retry=bool(auto)); snapshot_references(j,STORE/'jobs'/old['id']/'references'); old['retried_by']=j['id']; save('job',old); save('job',j)
+ (threading.Timer(defer,enqueue,[j]).start() if defer else enqueue(j)); return j
+# ---- read-only share links: served by a separate minimal listener that exposes nothing but approved prototype bundles ----
+def share_find(token):
+ for p in allof('prototype'):
+  for sh in p.get('shares',[]):
+   if hmac.compare_digest(str(sh['token']),str(token)):
+    if sh.get('revoked'): return None,'revoked'
+    if sh.get('expires_at') and sh['expires_at']<time.time(): return None,'expired'
+    return p,sh
+ return None,'unknown'
+def share_create(pid,hours):
+ p=get(pid)
+ if 'variant_id' not in p: raise ValueError('Shares belong to a built prototype')
+ if hours is not None and not (isinstance(hours,(int,float)) and 0<hours<=24*30): raise ValueError('Expiry must be between 1 hour and 30 days, or none')
+ sh=dict(token=secrets.token_urlsafe(18),created_at=time.time(),expires_at=(time.time()+hours*3600) if hours else None,revoked=False)
+ p.setdefault('shares',[]).append(sh); return save('prototype',p)
+def share_revoke(pid,token):
+ p=get(pid)
+ for sh in p.get('shares',[]):
+  if sh['token']==token: sh['revoked']=True
+ return save('prototype',p)
+SHARE_PLAYER='''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Shared prototype</title>
+<style>*{box-sizing:border-box}body{margin:0;font:13px system-ui,sans-serif;background:#ebecf0;color:#202124;height:100vh;display:flex;flex-direction:column}header{background:#242629;color:#e6e6ec;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px}header .grow{flex:1}button{font:inherit;height:28px;padding:0 10px;border-radius:6px;border:1px solid #494a50;background:#34363c;color:#e6e6ec;cursor:pointer}button.on{background:#6366f1;border-color:#6366f1}button:focus-visible{outline:2px solid #a5a7f5;outline-offset:2px}.info{background:#fff;padding:8px 14px;font-size:12px;border-bottom:1px solid #e5e7eb;display:flex;gap:24px;flex-wrap:wrap}main{flex:1;overflow:auto;padding:20px;display:flex;justify-content:center;align-items:flex-start}.device{height:100%;min-height:520px;width:1440px;max-width:100%}.device.mobile{width:390px;border:10px solid #2b2d33;border-radius:34px;overflow:hidden;background:#2b2d33;max-height:844px}iframe{width:100%;height:100%;border:0;background:#fff;display:block}.badge{font-size:11px;background:#fff;color:#242629;border-radius:4px;padding:2px 7px}</style></head>
+<body><header><strong>Prototype</strong><span class="badge">Read-only share</span><span class="grow"></span><button data-c="back">&#8592; Back</button><button data-c="forward">Forward &#8594;</button><button data-c="restart">Restart</button><button data-s="default">Default</button><button data-s="help">Help</button><button data-s="error">Error</button><button data-d="desktop" class="on">Desktop 1440</button><button data-d="mobile">Mobile 390</button></header>
+<div class="info" id="info" role="status" aria-live="polite"></div><main><div class="device" id="device"><iframe id="f" title="Shared click-through prototype" sandbox="allow-scripts"></iframe></div></main><script src="player.js"></script></body></html>'''
+SHARE_JS=r'''(function(){var f=document.getElementById("f"),info=document.getElementById("info"),dev=document.getElementById("device"),meta;
+function show(file){var i=0;meta.screens.forEach(function(s,k){if(s.file.split("/").pop()===file)i=k});var s=meta.screens[i];info.textContent="";[s.title+" \u00b7 screen "+(i+1)+" of "+meta.screens.length,meta.board_title+" \u00b7 v"+meta.version,dev.className.indexOf("mobile")>-1?"Mobile \u00b7 390px":"Desktop \u00b7 1440px"].forEach(function(t){var e=document.createElement("span");e.textContent=t;info.appendChild(e)})}
+fetch("meta.json").then(function(r){return r.json()}).then(function(m){meta=m;var st=m.screens.filter(function(s){return s.id===m.start})[0]||m.screens[0];f.src="f/"+st.file;show(st.file.split("/").pop())});
+window.addEventListener("message",function(e){if(e.source!==f.contentWindow||!e.data||e.data.type!=="screen"||!meta)return;show(String(e.data.file||"").replace(/[^\w.\-]/g,""))});
+function send(m){f.contentWindow.postMessage(m,"*")}
+document.querySelectorAll("[data-c]").forEach(function(b){b.onclick=function(){if(b.dataset.c==="restart"){var st=meta.screens.filter(function(s){return s.id===meta.start})[0]||meta.screens[0];f.src="f/"+st.file}else send({cmd:b.dataset.c})}});
+document.querySelectorAll("[data-s]").forEach(function(b){b.onclick=function(){send({cmd:"state",name:b.dataset.s})}});
+document.querySelectorAll("[data-d]").forEach(function(b){b.onclick=function(){dev.className="device "+(b.dataset.d==="mobile"?"mobile":"");document.querySelectorAll("[data-d]").forEach(function(x){x.classList.toggle("on",x===b)});if(meta)show((meta.screens[0]||{}).file.split("/").pop())}})})();'''
+class ShareHandler(BaseHTTPRequestHandler):
+ server_version='Share'; sys_version=''
+ def log_message(self,*a): pass
+ def reply(self,status,body,ctype='text/html; charset=utf-8',extra=None):
+  data=body if isinstance(body,bytes) else body.encode(); self.send_response(status)
+  for k,v in {'Content-Type':ctype,'Content-Length':str(len(data)),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Robots-Tag':'noindex, nofollow',**(extra or {})}.items(): self.send_header(k,v)
+  self.end_headers(); self.wfile.write(data)
+ def do_GET(self):
+  m=re.match(r'^/s/([A-Za-z0-9_-]{16,64})/(.*)$',urlparse(self.path).path)
+  if not m: return self.reply(404,'Not found')
+  token,rest=m.groups(); p,info=share_find(token)
+  if not p: return self.reply(410 if info in ('expired','revoked') else 404,'<!doctype html><meta charset="utf-8"><title>Link unavailable</title><p style="font:16px system-ui;margin:3em auto;max-width:30em">This prototype link '+('has expired or was revoked.' if info in ('expired','revoked') else 'is not valid.')+'</p>')
+  csp="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; form-action 'none'"
+  try:
+   if rest in ('','index.html'): return self.reply(200,SHARE_PLAYER,extra={'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; frame-src 'self'; connect-src 'self'"})
+   if rest=='player.js': return self.reply(200,SHARE_JS,'application/javascript')
+   if rest=='meta.json': return self.reply(200,json.dumps(dict(board_title=p['board_title'],version=p['version'],start=p['start_screen_id'],screens=[dict(id=x['id'],title=x['title'],file=x['file']) for x in p['screens']])),'application/json')
+   if rest.startswith('f/'):
+    f=safe_path(STORE/'prototypes'/p['id'],rest[2:])
+    if not f.is_file(): return self.reply(404,'Not found')
+    import mimetypes; return self.reply(200,f.read_bytes(),mimetypes.guess_type(f)[0] or 'application/octet-stream',{'Content-Security-Policy':csp})
+  except ValueError: return self.reply(404,'Not found')
+  return self.reply(404,'Not found')
 class Handler(SimpleHTTPRequestHandler):
  def log_message(self,*args): pass
  def send_json(self,x,status=200):
@@ -644,6 +723,7 @@ class Handler(SimpleHTTPRequestHandler):
   path=urlparse(self.path).path
   try:
    if path=='/api/local-agents': return self.send_json(discover())
+   if path=='/api/config': return self.send_json(dict(bwrap=bwrap_ok(),share_port=SHARE_PORT))
    if path=='/api/state': return self.send_json(mask_state({k:allof(k) for k in ['project','context','board','variant','job','research','annotation','runner','prototype','reference']}))
    if path.startswith('/api/export/'):
     rec=get(path.split('/')[-1]); proto='variant_id' in rec; v=get(rec['variant_id']) if proto else rec; folder=STORE/('prototypes' if proto else 'variants')/rec['id']; buf=io.BytesIO()
@@ -700,6 +780,8 @@ class Handler(SimpleHTTPRequestHandler):
    elif action=='board-blind': result=set_blind(d['board_id'],d.get('blind',True))
    elif action=='blind-choice': result=blind_choice(d['board_id'],d.get('variant_id'),d.get('reason',''))
    elif action=='mix': result=mix_variants(d['board_id'],d.get('picks'))
+   elif action=='share-create': result=share_create(d['prototype_id'],d.get('hours'))
+   elif action=='share-revoke': result=share_revoke(d['prototype_id'],d['token'])
    elif action=='approve': result=approve(d['id'])
    elif action=='accept-revision': result=set_review_state(d['id'],'accepted')
    elif action=='revert-revision': result=set_review_state(d['id'],'reverted')
@@ -723,12 +805,21 @@ class Handler(SimpleHTTPRequestHandler):
    elif action=='retry-job': result=retry_job(d['id'])
    elif action=='update-runner':
     r=get(d['id']); r.update({k:d[k] for k in ['name','enabled','timeout'] if k in d})
+    if 'auto_retries' in d:
+     if not isinstance(d['auto_retries'],int) or not 0<=d['auto_retries']<=3: raise ValueError('Automatic retries must be 0 to 3')
+     r['auto_retries']=d['auto_retries']
+    if 'sandbox' in d:
+     if d['sandbox'] not in (None,'bwrap','none'): raise ValueError('Unknown sandbox')
+     if d['sandbox']=='bwrap' and not bwrap_ok(): raise ValueError('bubblewrap is not usable on this machine')
+     r['sandbox']='bwrap' if d['sandbox']=='bwrap' else None
+     if r.get('agent'): r['args']=configuration(r['agent'],r.get('model',''),sandbox=bool(r['sandbox']))['args']   # the agent's own sandbox flag must follow ours
     if 'env_allowlist' in d:
      names=[str(x).strip() for x in d['env_allowlist'] if str(x).strip()]
      if any(not re.fullmatch(r'[A-Z_][A-Z0-9_]*',n) for n in names): raise ValueError('Environment variable names must be UPPER_SNAKE_CASE')
      r['env_allowlist']=names
     if 'model' in d and r['type']=='cli':
-     r['args']=configuration(r['agent'],d['model'].strip())['args']; r['model']=d['model'].strip()
+     if r.get('agent') and d['model'].strip()!=r.get('model',''): r['args']=configuration(r['agent'],d['model'].strip(),sandbox=bool(r.get('sandbox')))['args']
+     r['model']=d['model'].strip()
     if not str(r['name']).strip(): raise ValueError('Runner needs a name')
     result=save('runner',r)
    elif action=='delete-runner':
@@ -766,6 +857,10 @@ def main():
   else:
    print(f'Design Studio: cannot listen on 127.0.0.1:{port}: {error}',file=sys.stderr)
   return 1
+ share=None
+ if SHARE_PORT:
+  try: share=ThreadingHTTPServer((os.environ.get('STUDIO_SHARE_HOST','0.0.0.0'),SHARE_PORT),ShareHandler); threading.Thread(target=share.serve_forever,daemon=True).start(); print(f'Share links enabled on port {SHARE_PORT} (read-only prototype bundles only; the studio itself stays on 127.0.0.1)',flush=True)
+  except OSError as e: print(f'Share listener could not start on port {SHARE_PORT}: {e}',file=sys.stderr)
  with server:
   seed()
   resumed=recover_jobs(); start_workers()

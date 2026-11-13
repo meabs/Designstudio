@@ -1,4 +1,4 @@
-import sys, tempfile, unittest, time, threading
+import sys, tempfile, unittest, time, threading, json
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'apps/api'))
@@ -327,5 +327,82 @@ class LifecycleTest(unittest.TestCase):
     f=s.STORE/'variants'/v['id']/'screens'/f'{sid}.html'; f.write_text(f.read_text()+f'<style>body{{font-family:{font},serif}}</style>')
   m=s.mix_variants(self.b['id'],{'0':a['id'],'1':b['id'],'2':a['id']}); c=[x for x in m['validation'] if x['check'].startswith('Cross-screen consistency')][0]
   self.assertEqual(c['outcome'],'review'); self.assertIn('different primary fonts: georgia, inter',c['evidence']); self.assertIn('not a visual review',c['evidence'])
+
+ # --- auto retry
+ def run_worker_job(self,runner,**kw):
+  j=dict(id=s.uid(),project_id=self.p['id'],type='generate_board',runner_id=runner['id'],context=s.get(self.p['context_id']),board_id=self.b['id'],parent_id=None,annotations=[],brief='b',instruction='t',events=[],status='queued',created_at=time.time(),**kw); s.save('job',j); return j
+ def test_auto_retry_creates_linked_attempts_up_to_the_limit(self):
+  self.drain(); r=self.cli_runner('/bin/false',[]); r['auto_retries']=2; s.save('runner',r); j=self.run_worker_job(r)
+  with patch.object(s.threading,'Timer') as timer:
+   s.execute(j); s.maybe_auto_retry(j['id']); second=s.get(s.get(j['id'])['retried_by']); self.assertEqual((second['attempt'],second['auto_retry'],second['retry_of']),(2,True,j['id'])); self.assertIn('attempt 2 of 3',second['events'][0]['message']); self.assertEqual(timer.call_args[0][0],2)
+   s.execute(second); s.maybe_auto_retry(second['id']); third=s.get(s.get(second['id'])['retried_by']); self.assertEqual(third['attempt'],3)
+   s.execute(third); s.maybe_auto_retry(third['id']); self.assertIsNone(s.get(third['id']).get('retried_by'),'stops at the limit')
+ def test_no_auto_retry_by_default_after_cancel_or_for_success(self):
+  r=self.cli_runner('/bin/false',[]); j=self.run_worker_job(r); s.execute(j); s.maybe_auto_retry(j['id']); self.assertIsNone(s.get(j['id']).get('retried_by'))
+  r2=self.cli_runner('/bin/false',[]); r2['auto_retries']=3; s.save('runner',r2); c=self.run_worker_job(r2); s.CANCEL.add(c['id']); s.execute(c); s.maybe_auto_retry(c['id']); self.assertEqual(s.get(c['id'])['status'],'cancelled'); self.assertIsNone(s.get(c['id']).get('retried_by'))
+  ok=self.run_worker_job(s.allof('runner')[0]); 
+  with patch.object(s.subprocess,'run',return_value=None),patch.object(s.time,'sleep'): s.execute(ok)
+  s.maybe_auto_retry(ok['id']); self.assertEqual(s.get(ok['id'])['status'],'succeeded'); self.assertIsNone(s.get(ok['id']).get('retried_by'))
+ # --- sandbox
+ def sandboxed(self,script,**cfg):
+  r=self.cli_runner('/bin/sh',['-c',script]); r.update(sandbox='bwrap',sandbox_ro=[],sandbox_rw=[],**cfg); s.save('runner',r); j=self.run_worker_job(r); s.execute(j); return s.get(j['id']),(s.STORE/'jobs'/j['id'])
+ def test_sandbox_command_shape(self):
+  from unittest.mock import patch as p
+  with p.object(s,'bwrap_ok',return_value=True):
+   cmd=s.sandbox_command(dict(sandbox_ro=['/opt/x'],sandbox_rw=['~/.agent']),['agent','run'],s.STORE/'jobs'/'j1')
+  self.assertEqual(cmd[0],'bwrap'); self.assertIn('--tmpfs',cmd); self.assertEqual(cmd[-2:],['agent','run']); self.assertIn('--unshare-pid',cmd); self.assertIn('--die-with-parent',cmd)
+  self.assertIn('--ro-bind-try',cmd); self.assertIn('--bind-try',cmd); self.assertNotIn('--unshare-net',cmd)
+  with p.object(s,'bwrap_ok',return_value=False), self.assertRaisesRegex(ValueError,'bubblewrap'): s.sandbox_command({},['x'],s.STORE)
+ @unittest.skipUnless(s.bwrap_ok(),'bubblewrap not usable here')
+ def test_sandbox_hides_storage_and_home_and_blocks_writes_but_keeps_job_dir(self):
+  other=s.STORE/'jobs'/'other'; other.mkdir(parents=True); (other/'secret.txt').write_text('TOPSECRET'); (s.STORE/'studio-note.txt').write_text('NOTE')
+  script='echo ok > output_marker.txt; cat '+str(other/'secret.txt')+' 2>&1; cat '+str(s.STORE/'studio-note.txt')+' 2>&1; echo HOME_ENTRIES=$(ls -A "$HOME" | wc -l); touch /etc/sandbox-write 2>&1; touch /usr/sandbox-write 2>&1; echo NET=$(cat /proc/net/dev | wc -l)'
+  j,folder=self.sandboxed(script); log=(folder/'runner.log').read_text()
+  self.assertTrue((folder/'output_marker.txt').is_file(),'job dir stays writable'); self.assertNotIn('TOPSECRET',log); self.assertNotIn('NOTE',log); self.assertIn('No such file',log); self.assertIn('HOME_ENTRIES=0',log); self.assertEqual(log.count('Read-only file system'),2)
+  self.assertNotIn('NET=0',log)
+ @unittest.skipUnless(s.bwrap_ok(),'bubblewrap not usable here')
+ def test_sandbox_rebinds_only_listed_paths(self):
+  import tempfile as tf, os
+  with tf.TemporaryDirectory(dir=os.path.expanduser('~')) as d:
+   (Path(d)/'auth.txt').write_text('TOKEN-DATA')
+   r=self.cli_runner('/bin/sh',['-c','cat '+d+'/auth.txt; ls -A "$HOME" | wc -l']); r.update(sandbox='bwrap',sandbox_ro=[d],sandbox_rw=[]); s.save('runner',r); j=self.run_worker_job(r); s.execute(j)
+   log=(s.STORE/'jobs'/j['id']/'runner.log').read_text(); self.assertIn('TOKEN-DATA',log)
+
+ # --- share links
+ def shared(self,hours=None):
+  v=self.variant(); proto=s.approve(v['id'])['prototype']; proto=s.share_create(proto['id'],hours); return proto,proto['shares'][-1]['token']
+ def serve(self):
+  from http.server import ThreadingHTTPServer; srv=ThreadingHTTPServer(('127.0.0.1',0),s.ShareHandler); import threading as th; th.Thread(target=srv.serve_forever,daemon=True).start(); return srv,f'http://127.0.0.1:{srv.server_address[1]}'
+ def get_url(self,url):
+  import urllib.request, urllib.error
+  try:
+   with urllib.request.urlopen(url) as r: return r.status,r.read(),dict(r.headers)
+  except urllib.error.HTTPError as e: return e.code,e.read(),dict(e.headers)
+ def test_share_serves_only_the_prototype_bundle_read_only(self):
+  proto,token=self.shared(); srv,base=self.serve()
+  try:
+   st,body,h=self.get_url(f'{base}/s/{token}/'); self.assertEqual(st,200); self.assertIn(b'Read-only share',body); self.assertEqual(h['Cache-Control'],'no-store'); self.assertIn('noindex',h['X-Robots-Tag'])
+   st,body,_=self.get_url(f'{base}/s/{token}/meta.json'); meta=json.loads(body); self.assertEqual(len(meta['screens']),3); self.assertNotIn('runner',body.decode().lower()); self.assertNotIn('context',body.decode().lower())
+   st,body,h=self.get_url(f'{base}/s/{token}/f/screens/0.html'); self.assertEqual(st,200); self.assertIn(b'nav.js',body); self.assertIn("connect-src 'self'",h['Content-Security-Policy'])
+   st,_,_=self.get_url(f'{base}/s/{token}/f/_player/nav.js'); self.assertEqual(st,200)
+   for bad in ('/api/state','/assets/jobs/x/envelope.json','/','/s/short/','/projects',f'/s/{token}/f/../../studio.db',f'/s/{token}/f/%2e%2e/%2e%2e/studio.db',f'/s/{token}/f//etc/passwd',f'/s/{token}/api/state'):
+    self.assertIn(self.get_url(base+bad)[0],(404,410),bad)
+   import urllib.request; req=urllib.request.Request(f'{base}/s/{token}/',method='POST',data=b'x')
+   with self.assertRaises(Exception): urllib.request.urlopen(req)
+  finally: srv.shutdown()
+ def test_share_tokens_expire_revoke_and_do_not_cross_prototypes(self):
+  proto,token=self.shared(hours=1); self.assertEqual(s.share_find(token)[0]['id'],proto['id'])
+  p=s.get(proto['id']); p['shares'][-1]['expires_at']=time.time()-5; s.save('prototype',p); self.assertEqual(s.share_find(token),(None,'expired'))
+  proto2,t2=self.shared(); s.share_revoke(proto2['id'],t2); self.assertEqual(s.share_find(t2),(None,'revoked')); self.assertEqual(s.share_find('nope'+'x'*20),(None,'unknown'))
+  srv,base=self.serve()
+  try: self.assertEqual(self.get_url(f'{base}/s/{token}/')[0],410); self.assertEqual(self.get_url(f'{base}/s/{t2}/f/screens/0.html')[0],410)
+  finally: srv.shutdown()
+ def test_share_validation(self):
+  v=self.variant()
+  with self.assertRaises(ValueError): s.share_create(v['id'],1)
+  proto=s.approve(v['id'])['prototype']
+  for bad in (0,-1,24*30+1,'x'):
+   with self.assertRaises(ValueError): s.share_create(proto['id'],bad)
+  self.assertIsNone(s.share_create(proto['id'],None)['shares'][-1]['expires_at']); self.assertGreater(len(s.share_create(proto['id'],24)['shares'][-1]['token']),20)
 
 if __name__=='__main__': unittest.main()

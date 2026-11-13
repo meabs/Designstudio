@@ -140,6 +140,16 @@ await step('approved version is locked; other versions cannot be reverted over i
   const r = await fetch(origin + '/api/revert-revision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: revisionId }) }); assert.equal(r.status, 400);
   await page.goto(`${origin}/projects/${project.id}/boards/${board.id}/review/${revisionId}`); await page.locator('.lockline').getByText('Approved and locked').waitFor();
 });
+await step('share link: create, open read-only on the share port, expiry list, revoke', async () => {
+  const cfg = await (await fetch(origin + '/api/config')).json(); if (!cfg.share_port) { console.log('skip share (start the server with STUDIO_SHARE_PORT to test)'); return; }
+  const proto = (await api('state')).prototype.find(p => p.board_id === board.id); await page.goto(`${origin}/projects/${project.id}/prototypes/${proto.id}`); await page.getByRole('button', { name: /Share/ }).click();
+  await page.locator('#share-exp').selectOption('1'); await page.locator('#modal-form').getByRole('button', { name: 'Create link' }).click(); await page.locator('[data-share-input]').waitFor();
+  const link = await page.locator('[data-share-input]').first().inputValue(); assert.match(link, /\/s\/[A-Za-z0-9_-]{20,}\/$/); const shareOrigin = new URL(link).origin;
+  const viewer = await ctx.newPage(); await viewer.goto(link); await viewer.getByText('Read-only share').waitFor(); await viewer.frameLocator('#f').locator('[data-role="primary-action"]').first().waitFor();
+  await until(async () => /screen 1 of 3/.test(await viewer.locator('#info').textContent()), 'viewer info'); await viewer.frameLocator('#f').locator('[data-role="primary-action"]').first().click(); await until(async () => /screen 2 of 3/.test(await viewer.locator('#info').textContent()), 'viewer navigation');
+  assert.equal((await fetch(shareOrigin + '/api/state')).status, 404); assert.equal((await fetch(shareOrigin + '/')).status, 404);
+  await page.locator('[data-share-revoke]').first().click(); await until(async () => (await fetch(link)).status === 410, 'revoked link gone'); await viewer.close();
+});
 await step('mix screens from different versions into a new immutable version', async () => {
   await page.goto(`${origin}/projects/${project.id}/boards/${board.id}`); await page.getByRole('button', { name: /Mix screens/ }).click(); await page.locator('.mixgrid').waitFor();
   const before = (await api('state')).variant.length; await page.locator('#modal-form').getByRole('button', { name: 'Create mixed version' }).click();
@@ -163,6 +173,13 @@ await step('failure handling: cancel, timeout/failed card, retry, partial failur
   const retried = await until(async () => (await api('state')).job.find(j => j.retry_of === jobs[2].id), 'retry job'); assert.equal(retried.input_hash, jobs[2].input_hash);
   await until(async () => (await api('state')).variant.some(v => v.job_id === jobs[0].id), 'fixture variant still produced');
   await api('delete-runner', { id: slow.id }); await api('delete-runner', { id: bad.id });
+});
+await step('settings: automatic retries and sandbox persist on a local agent runner', async () => {
+  const r = await api('runner', { type: 'cli', name: 'Sandboxed CLI', executable: '/bin/true', args: [], timeout: 30, auto_retries: 0, sandbox: null }); const cfg = await (await fetch(origin + '/api/config')).json();
+  await page.goto(origin + '/settings/agents'); const row = page.locator(`[data-runner="${r.id}"]`); await row.locator('[data-runner-retries]').fill('2');
+  if (cfg.bwrap) await row.locator('[data-runner-sandbox]').check(); await row.getByRole('button', { name: 'Save' }).click();
+  await until(async () => (await api('state')).runner.find(x => x.id === r.id).auto_retries === 2, 'retries saved'); assert.equal((await api('state')).runner.find(x => x.id === r.id).sandbox, cfg.bwrap ? 'bwrap' : null);
+  await api('delete-runner', { id: r.id });
 });
 await step('settings: edit, disable, test runners', async () => {
   await page.goto(origin + '/settings/agents'); const row = page.locator('[data-runner]').first(); await row.locator('[data-runner-name]').fill('Studio A renamed'); await row.getByRole('button', { name: 'Save' }).click();

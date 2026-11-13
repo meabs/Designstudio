@@ -10,7 +10,7 @@ Requirements: Python 3.10+; Google Chrome on PATH as `google-chrome` for rendere
 python3 apps/api/server.py
 ```
 
-Open http://localhost:5173. No package installation or API key is required for fixture mode. SQLite and generated artifacts are stored in `storage/`. Configure `PORT` and `STUDIO_STORAGE` through environment variables if needed.
+Open http://localhost:5173. Optional: `STUDIO_SHARE_PORT=5180` serves read-only prototype share links on a separate port (see the user guide). No package installation or API key is required for fixture mode. SQLite and generated artifacts are stored in `storage/`. Configure `PORT` and `STUDIO_STORAGE` through environment variables if needed.
 
 If startup reports that the port is already in use, choose another port:
 
@@ -47,7 +47,7 @@ See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for the full walkthrough. In short:
 ## Checking a real agent (contract doctor)
 
 ```sh
-python3 apps/api/doctor.py claude --guidance --references --region --mix     # or: codex
+python3 apps/api/doctor.py claude --guidance --references --region --mix     # or: codex (runs inside the sandbox when bubblewrap works)
 ```
 
 Runs the agent through the studio's own runner path on a throwaway project (temporary storage; your projects are untouched) and reports each stage: manifest and package validation, screenshots, whether changing a token changes the output (`--guidance`) and whether the agent really read a reference image (`--references`), whether a pinned-element revision changes only that element (`--region`) and whether mixed versions render identically to their sources (`--mix`). It uses your own agent login and makes 1–6 real model calls depending on flags (several minutes). Add `--keep` to inspect the generated files.

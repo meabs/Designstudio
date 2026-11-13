@@ -191,6 +191,14 @@ async function action(name) {
     case 'approve': if (!v) return toast('Generate a variation first'); return approveModal();
     case 'preview': { const proto = prototypeOf(vs.find(x => x.approved)); if (!proto) return toast('Approve a board variation before previewing'); go(nav('prototypes') + '/' + proto.id); return; }
     case 'exit-player': { const proto = S.data.prototype.find(x => x.id === route().prototypeId); const board = S.data.board.find(x => x.id === proto?.board_id); go(board ? boardPath(board) : nav('boards')); return; }
+    case 'share': {
+      const proto = S.data.prototype.find(x => x.id === route().prototypeId); if (!proto) return;
+      const base = `${location.protocol}//${location.hostname}:${S.config.share_port}`, live = (proto.shares || []).filter(x => !x.revoked), stamp = x => x.expires_at ? (x.expires_at * 1000 < Date.now() ? 'expired' : 'expires ' + new Date(x.expires_at * 1000).toLocaleString()) : 'no expiry';
+      return modal('Share this prototype', `${S.config.share_port ? '' : '<div class="inline-note warn">Sharing is off. Restart the studio with <code>STUDIO_SHARE_PORT=5180</code> to serve links. Only prototype bundles are exposed on that port; the studio itself stays local.</div>'}<p class="muted">A link opens a read-only player for this exact approved build (v${proto.version}). Anyone with the link can view it until it expires or you revoke it. There is no other access control, so share it only with people you trust.</p>${live.length ? `<h3 style="font-size:12px;margin:16px 0 6px">Active links</h3>${live.map(x => `<div class="sharerow"><input readonly aria-label="Share link" value="${esc(`${base}/s/${x.token}/`)}" data-share-input><span class="tiny muted">${stamp(x)}</span><button type="button" data-share-copy="${esc(`${base}/s/${x.token}/`)}">Copy</button><button type="button" data-share-revoke="${esc(x.token)}">Revoke</button></div>`).join('')}${location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? '<p class="tiny muted">To open a link on another device, replace “localhost” with this computer’s address.</p>' : ''}` : ''}<label for="share-exp">New link expires after</label><select id="share-exp" name="hours"><option value="1">1 hour</option><option value="24" selected>24 hours</option><option value="168">7 days</option><option value="720">30 days</option><option value="">Never</option></select>`, 'Create link', async f => {
+        if (!S.config.share_port) throw Error('Start the studio with STUDIO_SHARE_PORT set to enable sharing');
+        const h = f.get('hours'); await api('share-create', { prototype_id: proto.id, hours: h === '' ? null : Number(h) }); await refresh(false); setTimeout(() => action('share'), 0);
+      });
+    }
     case 'restart': { const proto = S.data.prototype.find(x => x.id === route().prototypeId); $('#player').src = protoLive(proto, proto.start_screen_id); return; }
     case 'zoom-in': return setZoom(S.zoom + 10);
     case 'zoom-out': return setZoom(S.zoom - 10);
@@ -244,6 +252,8 @@ async function onClick(e) {
   if (a && a.getAttribute('href')?.startsWith('/') && !a.target && !a.hasAttribute('download') && !a.href.includes('/api/export/')) { e.preventDefault(); return go(a.getAttribute('href')); }
   const t = e.target, q = sel => t.closest(sel), { b, v } = current(); let el;
   if ((el = q('[data-handoff]'))) return handoff(el.dataset.handoff);
+  if ((el = q('[data-share-copy]'))) { try { await navigator.clipboard.writeText(el.dataset.shareCopy); toast('Link copied'); } catch { const i = document.querySelector('[data-share-input]'); i?.select(); toast('Press Ctrl+C to copy the selected link'); } return; }
+  if ((el = q('[data-share-revoke]'))) { const proto = S.data.prototype.find(x => x.id === route().prototypeId); await post('share-revoke', { prototype_id: proto.id, token: el.dataset.shareRevoke }); await refresh(false); toast('Link revoked'); return action('share'); }
   if ((el = q('[data-action]'))) return action(el.dataset.action);
   if ((el = q('[data-blind-toggle]'))) { await post('board-blind', { board_id: b.id, blind: el.dataset.blindToggle === 'true' }); toast(el.dataset.blindToggle === 'true' ? 'Blind mode on: runner identities are hidden' : 'Blind mode off'); return refresh(); }
   if ((el = q('[data-blind-pick]'))) { const id = el.dataset.blindPick, pv = S.data.variant.find(x => x.id === id); return modal('Choose this option', `<p>You are choosing <strong>${esc(pv.runner_name)} v${pv.version}</strong>. Runner identities will be revealed afterwards and your choice is recorded.</p><label for="bp-r">Why? (optional)</label><textarea id="bp-r" name="reason" rows="3" placeholder="e.g. clearer explanation of why we ask for income"></textarea>`, 'Choose and reveal', async f => { const board = await post('blind-choice', { board_id: b.id, variant_id: id, reason: f.get('reason') }); toast(`Revealed: ${board.blind_choice.label ? 'Option ' + board.blind_choice.label + ' was ' : ''}${board.blind_choice.runner_name}`); }); }
@@ -263,7 +273,7 @@ async function onClick(e) {
   if ((el = q('[data-pin]'))) { S.activePin = el.dataset.pin; return draw(); }
   if ((el = q('[data-review-check]'))) { await post('review-check', { variant_id: v.id, index: Number(el.dataset.reviewCheck), decision: el.dataset.decision }); return refresh(); }
   if ((el = q('[data-test-runner]'))) { const id = el.dataset.testRunner, r = await post('test-runner', { id }); const out = $('#test-' + id); if (out) out.textContent = r.message; return toast(r.message); }
-  if ((el = q('[data-save-runner]'))) { const id = el.dataset.saveRunner, row = el.closest('[data-runner]'), data = { id, name: row.querySelector('[data-runner-name]').value, enabled: row.querySelector('[data-runner-enabled]').checked }, model = row.querySelector('[data-runner-model]'); if (model) data.model = model.value; const env = row.querySelector('[data-runner-env]'); if (env) data.env_allowlist = env.value.split(/[\s,]+/).filter(Boolean); await post('update-runner', data); toast('Runner saved'); return refresh(); }
+  if ((el = q('[data-save-runner]'))) { const id = el.dataset.saveRunner, row = el.closest('[data-runner]'), data = { id, name: row.querySelector('[data-runner-name]').value, enabled: row.querySelector('[data-runner-enabled]').checked }, model = row.querySelector('[data-runner-model]'); if (model) data.model = model.value; const retries = row.querySelector('[data-runner-retries]'); if (retries) data.auto_retries = Math.max(0, Math.min(3, parseInt(retries.value || '0', 10) || 0)); const sbx = row.querySelector('[data-runner-sandbox]'); if (sbx && !sbx.disabled) data.sandbox = sbx.checked ? 'bwrap' : 'none'; const env = row.querySelector('[data-runner-env]'); if (env) data.env_allowlist = env.value.split(/[\s,]+/).filter(Boolean); await post('update-runner', data); toast('Runner saved'); return refresh(); }
   if ((el = q('[data-delete-runner]'))) { const id = el.dataset.deleteRunner; return confirmDialog('Delete runner configuration?', `<p>${esc(runnerOf(id)?.name)} will be removed. Past jobs and variations keep their history.</p>`, 'Delete', () => post('delete-runner', { id })); }
   if ((el = q('[data-restore-project]'))) { await post('update-project', { id: el.dataset.restoreProject, archived: false }); return refresh(); }
   if ((el = q('[data-hist-filter]'))) { S.histFilter = el.dataset.histFilter; return draw(); }
@@ -335,7 +345,7 @@ window.addEventListener('message', e => {
 });
 
 /* ---------- boot & polling ---------- */
-await refresh(false); S.agents = await api('local-agents');
+await refresh(false); S.agents = await api('local-agents'); S.config = await api('config');
 if (location.pathname === '/') { const p = S.data.project.find(x => !x.archived), b = S.data.board.find(x => x.project_id === p?.id); history.replaceState({}, '', p ? `/projects/${p.id}/boards${b ? '/' + b.id : ''}` : '/projects'); }
 draw();
 setInterval(async () => {
