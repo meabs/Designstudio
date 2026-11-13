@@ -228,4 +228,38 @@ class LifecycleTest(unittest.TestCase):
   with patch.object(s,'region_revise',side_effect=sloppy): job,child=self.revision_with('heading')
   chk=[x for x in child['validation'] if x['check'].startswith('Revision scope')]; self.assertEqual([x['outcome'] for x in chk],['fail']); self.assertIn('page content',chk[0]['evidence']); self.assertTrue(child['changed_regions']['0']['outside'])
 
+ # --- blind A/B
+ def blind_board(self):
+  s.set_blind(self.b['id'],True)
+  with patch.object(s.threading,'Thread'): jobs=s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=[r['id'] for r in s.allof('runner')[:2]]),'generate_board',self.p['id'])
+  with patch.object(s.subprocess,'run',return_value=None),patch.object(s.time,'sleep'):
+   for j in jobs: s.execute(s.get(j['id']))
+  return [s.get(s.get(j['id'])['variant_id']) for j in jobs]
+ def api_state(self): return s.mask_state({k:s.allof(k) for k in ['project','context','board','variant','job','research','annotation','runner','prototype','reference']})
+ def test_blind_labels_are_random_distinct_and_state_hides_identity(self):
+  vs=self.blind_board(); labels=[v['blind_label'] for v in vs]; self.assertEqual(len(set(labels)),2)
+  st=self.api_state(); import json; blob=json.dumps([st['variant'],st['job']])
+  for v in st['variant']: self.assertEqual(v['runner_name'],'Option '+v['blind_label']); self.assertIsNone(v['runner_id']); self.assertNotIn('style',v)
+  self.assertNotIn('Studio A',blob); self.assertNotIn('Studio B',blob); self.assertNotIn('Template demo',blob)
+  self.assertEqual(s.get(vs[0]['id'])['runner_name'] in ('Studio A','Studio B'),True,'stored data is untouched')
+ def test_revision_in_blind_mode_works_without_runner_id_and_inherits_label(self):
+  vs=self.blind_board(); parent=vs[0]; pin=s.save('annotation',dict(id=s.uid(),variant_id=parent['id'],screen='0',x=.5,y=.2,comment='c',element_id='heading',status='open',selected=True,created_at=time.time()))
+  with patch.object(s.threading,'Thread'): job=s.launch(dict(board_id=self.b['id'],parent_id=parent['id'],annotation_ids=[pin['id']]),'revise_board',self.p['id'])[0]
+  self.assertEqual(job['runner_id'],parent['runner_id'])
+  with patch.object(s.subprocess,'run',return_value=None),patch.object(s.time,'sleep'): s.execute(s.get(job['id']))
+  self.assertEqual(s.get(s.get(job['id'])['variant_id'])['blind_label'],parent['blind_label'])
+ def test_choice_reveals_and_records_result_and_cannot_reblind(self):
+  vs=self.blind_board(); b=s.blind_choice(self.b['id'],vs[1]['id'],'cleaner'); self.assertTrue(b['revealed']); self.assertEqual(b['blind_choice']['runner_name'],vs[1]['runner_name']); self.assertEqual(b['blind_choice']['label'],vs[1]['blind_label'])
+  st=self.api_state(); self.assertIn(vs[1]['runner_name'],[v['runner_name'] for v in st['variant']])
+  with self.assertRaises(ValueError): s.set_blind(self.b['id'],True)
+  with self.assertRaises(ValueError): s.blind_choice(self.b['id'],vs[0]['id'])
+ def test_approving_in_blind_mode_ends_blindness_with_a_recorded_choice(self):
+  vs=self.blind_board(); res=s.approve(vs[0]['id']); b=s.get(self.b['id']); self.assertTrue(b['revealed']); self.assertEqual(b['blind_choice']['reason'],'Approved'); self.assertEqual(b['blind_choice']['variant_id'],vs[0]['id'])
+ def test_enabling_blind_labels_existing_variants_and_lineage(self):
+  parent=self.variant(); pin=s.save('annotation',dict(id=s.uid(),variant_id=parent['id'],screen='0',x=.5,y=.2,comment='c',element_id='heading',status='open',selected=True,created_at=time.time()))
+  child=s.get(self.run_job('revise_board',1,parent['id'],[pin])['variant_id']); s.set_blind(self.b['id'],True)
+  self.assertTrue(s.get(parent['id'])['blind_label']); self.assertEqual(s.get(child['id'])['blind_label'],s.get(parent['id'])['blind_label'])
+ def test_reveal_without_choice(self):
+  self.blind_board(); b=s.blind_choice(self.b['id']); self.assertTrue(b['revealed']); self.assertIsNone(b['blind_choice'])
+
 if __name__=='__main__': unittest.main()

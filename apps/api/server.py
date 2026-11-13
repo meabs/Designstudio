@@ -1,5 +1,5 @@
 from html.parser import HTMLParser
-import base64, os, json, sqlite3, uuid, hashlib, threading, time, re, html, zipfile, io, subprocess, shlex, shutil
+import random, base64, os, json, sqlite3, uuid, hashlib, threading, time, re, html, zipfile, io, subprocess, shlex, shutil
 from pathlib import Path
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
@@ -284,7 +284,7 @@ def _execute(j):
    board=get(j['board_id']); parent=get(j['parent_id']) if j.get('parent_id') else None
    variant=dict(id=uid(),project_id=j['project_id'],board_id=board['id'],job_id=j['id'],runner_id=runner['id'],runner_name=runner['name'],style=runner.get('style','a'),parent_id=j.get('parent_id'),context_id=ctx['id'],version=parent['version']+1 if parent else 1,approved=False,created_at=time.time(),changes=[])
    folder=STORE/'variants'/variant['id']; (folder/'screens').mkdir(parents=True)
-   variant['review_state']='pending' if parent else None; variant['references']=j.get('references',[])
+   variant['blind_label']=j.get('blind_label') or (parent or {}).get('blind_label'); variant['review_state']='pending' if parent else None; variant['references']=j.get('references',[])
    manifest=dict(schema_version='1.0',kind='clickthrough-static',board_id=board['id'],start_screen_id='0',screens=[],edges=[])
    annotations=j.get('annotations',[])
    for i,title in enumerate(board['screens']):
@@ -372,7 +372,10 @@ def approve(variant_id):
   for other in allof('variant'):
    if other['board_id']==v['board_id'] and other['id']!=v['id'] and other.get('approved'): other['approved']=False; other['superseded_approval_at']=time.time(); save('variant',other)
   if not v.get('approved'): v['approved']=True; v['approved_at']=time.time()
-  save('variant',v); proto=build_prototype(v)
+  save('variant',v)
+  b=get(v['board_id'])
+  if b.get('blind') and not b.get('revealed'): blind_choice(b['id'],v['id'],'Approved')
+  proto=build_prototype(v)
  return dict(variant=v,prototype=proto)
 def set_review_state(variant_id,state):
  v=get(variant_id)
@@ -418,6 +421,48 @@ def snapshot_references(j,source_dir):
   src=source_dir/r['file']
   if not src.is_file(): raise ValueError('Reference image is no longer available: '+r['name'])
   shutil.copyfile(src,dst/r['file'])
+# ---- blind A/B comparison: identities are withheld by the server until the designer chooses or reveals ----
+LETTERS='ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+def assign_labels(board_id,count):
+ used={v.get('blind_label') for v in allof('variant') if v['board_id']==board_id}|{j.get('blind_label') for j in allof('job') if j.get('board_id')==board_id}
+ pool=[c for c in LETTERS if c not in used]; random.SystemRandom().shuffle(pool); return pool[:count]
+def label_lineage(board_id):
+ vs=[v for v in allof('variant') if v['board_id']==board_id]; byid={v['id']:v for v in vs}
+ for v in sorted([v for v in vs if not v.get('parent_id') and not v.get('blind_label') and v.get('kind')!='mix'],key=lambda x:x['id']):
+  v['blind_label']=assign_labels(board_id,1)[0]; save('variant',v)
+ for v in sorted(vs,key=lambda x:x['created_at']):
+  if v.get('parent_id') and not v.get('blind_label'):
+   root=v
+   while root.get('parent_id') and root['parent_id'] in byid: root=byid[root['parent_id']]
+   if root.get('blind_label'): v['blind_label']=root['blind_label']; save('variant',v)
+def set_blind(board_id,on):
+ b=get(board_id)
+ if on and b.get('revealed'): raise ValueError('Identities were already revealed for this board')
+ b['blind']=bool(on); save('board',b)
+ if on: label_lineage(board_id)
+ return get(board_id)
+def blind_choice(board_id,variant_id=None,reason=''):
+ b=get(board_id)
+ if not b.get('blind') or b.get('revealed'): raise ValueError('This board is not in blind mode')
+ choice=None
+ if variant_id:
+  v=get(variant_id)
+  if v['board_id']!=board_id: raise ValueError('Choose a variation from this board')
+  choice=dict(variant_id=v['id'],label=v.get('blind_label'),runner_name=v['runner_name'],reason=str(reason)[:500],at=time.time())
+ b['revealed']=True; b['blind_choice']=choice; return save('board',b)
+def mask_state(state):
+ hidden={b['id'] for b in state['board'] if b.get('blind') and not b.get('revealed')}
+ if not hidden: return state
+ for v in state['variant']:
+  if v['board_id'] in hidden:
+   v['runner_name']='Option '+(v.get('blind_label') or '?') if v.get('kind')!='mix' else v['runner_name']; v['runner_id']=None; v.pop('style',None); v.pop('applied_tokens',None)
+   for c in v.get('validation',[]):
+    if c['check']=='Fixture guidance support': c.update(check='Guidance support',evidence='Some prose guidance may not be applied automatically; needs designer review.')
+ for j in state['job']:
+  if j.get('board_id') in hidden: j['runner_name']='Hidden (blind)'; j['runner_id']=None
+ for p in state['prototype']:
+  if p.get('board_id') in hidden: p['runner_name']='Hidden (blind)'
+ return state
 def create_board(data):
  project_id=data['project_id']; get(project_id)
  screens=data.get('screens',[])
@@ -438,7 +483,7 @@ def launch(data,kind,project_id):
  if key:
   existing=[j for j in allof('job') if j.get('key')==key and j['project_id']==project_id]
   if existing: return existing
- runners=data.get('runner_ids') or [next(r['id'] for r in allof('runner') if r.get('enabled',True))]; jobs=[]
+ runners=data.get('runner_ids') or ([get(data['parent_id'])['runner_id']] if kind=='revise_board' and data.get('parent_id') else [next(r['id'] for r in allof('runner') if r.get('enabled',True))]); jobs=[]
  enabled={r['id'] for r in allof('runner') if r.get('enabled',True)}
  if any(r not in enabled for r in runners): raise ValueError('Runner is disabled or no longer exists')
  annotations=data.get('annotations',[])
@@ -468,9 +513,11 @@ def launch(data,kind,project_id):
   common['parent_package']=str(STORE/'variants'/common['parent_id'])
  shared=digest(common)
  for runner_id in runners:
+  blind_labels=assign_labels(common['board_id'],1) if kind=='generate_board' and board_for_refs and board_for_refs.get('blind') else []
   j=dict(id=uid(),project_id=project_id,type=kind,runner_id=runner_id,runner_name=get(runner_id).get('name',''),status='queued',events=[],created_at=time.time(),input_hash=shared,key=key,**common)
   scope_text=('\nRevision scope (strict): '+'; '.join((f'screen {sid}: change ONLY the element(s) with data-design-id in {sc["elements"]} and their descendants, keep every other byte of that file identical' if sc['mode']=='region' else f'screen {sid}: you may change the whole screen') for sid,sc in scope.items())+'; all other screens must be copied unchanged.') if scope else ''
   refs_text=('\nReference images (designer-supplied visual context; files in references/). Treat them as inspiration or constraints, not verified brand rules; the guidelines above take precedence unless a note says otherwise:\n'+'\n'.join(f'- references/{r["file"]} · {r["name"]}'+(f' · note: {r["note"]}' if r['note'] else '') for r in references)) if references else ''
+  if blind_labels: j['blind_label']=blind_labels[0]
   j['instruction']=f'Task: {kind}. Output contract: static variant-package/1.0 or research.json.\nBrief: {common["brief"]}\nScreens: {common.get("board",{}).get("screens",[])}\nDESIGN.md:\n{ctx["markdown"]}\nTokens: {canonical(ctx["tokens"])}\nRules: {canonical(ctx["effective_rules"])}\nSnapshot SHA256: {ctx["hash"]}\nFindings (unverified unless explicitly sourced): {canonical(common["findings"])}\nSupplied sources (preserve provenance): {canonical(common["sources"])}\nAnnotations: {canonical(common["annotations"])}{refs_text}{scope_text}\nYou are running non-interactively: do not ask questions, do not reply with only a plan or summary, and do not wait for confirmation. The task is only complete when the files exist. Only create these file types: .html .css .js .json .png .jpg .svg .woff .woff2 (plus optional .md/.txt notes). Write files to output/. Research output: research.json with findings (id,title,detail,verification,source_ids,selected) and sources arrays. Variant output: manifest.json with schema_version=1.0, kind=clickthrough-static, board_id, start_screen_id=0 (string), screens array with id as zero-based string, title, file=screens/<id>.html, states array; edges with from,to,trigger. All requested screens must exist. Use data-role=primary-action on primary controls and data-design-id on annotation targets. For a revision, output/ ALREADY CONTAINS a full copy of the parent version: edit those files in place and leave everything not covered by the revision scope untouched. No external dependencies. Enumerate files and any guidelines you could not honor; self-report is not validation.'
   save('job',j); jobs.append(j); snapshot_references(j,STORE/'projects'/project_id/'references'); enqueue(j)
  if kind=='generate_board' and board_for_refs is not None and 'reference_ids' in data: board_for_refs['reference_ids']=[r['id'] for r in references]; save('board',board_for_refs)
@@ -492,7 +539,7 @@ class Handler(SimpleHTTPRequestHandler):
   path=urlparse(self.path).path
   try:
    if path=='/api/local-agents': return self.send_json(discover())
-   if path=='/api/state': return self.send_json({k:allof(k) for k in ['project','context','board','variant','job','research','annotation','runner','prototype','reference']})
+   if path=='/api/state': return self.send_json(mask_state({k:allof(k) for k in ['project','context','board','variant','job','research','annotation','runner','prototype','reference']}))
    if path.startswith('/api/export/'):
     rec=get(path.split('/')[-1]); proto='variant_id' in rec; v=get(rec['variant_id']) if proto else rec; folder=STORE/('prototypes' if proto else 'variants')/rec['id']; buf=io.BytesIO()
     with zipfile.ZipFile(buf,'w',zipfile.ZIP_DEFLATED) as z:
@@ -544,6 +591,8 @@ class Handler(SimpleHTTPRequestHandler):
    elif action=='reference-update':
     r=get(d['id']); r.update({k:str(d[k])[:500 if k=='note' else 80] for k in ['name','note'] if k in d}); result=save('reference',r)
    elif action=='reference-delete': result=delete_reference(d['id'])
+   elif action=='board-blind': result=set_blind(d['board_id'],d.get('blind',True))
+   elif action=='blind-choice': result=blind_choice(d['board_id'],d.get('variant_id'),d.get('reason',''))
    elif action=='approve': result=approve(d['id'])
    elif action=='accept-revision': result=set_review_state(d['id'],'accepted')
    elif action=='revert-revision': result=set_review_state(d['id'],'reverted')

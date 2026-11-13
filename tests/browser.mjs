@@ -168,6 +168,20 @@ await step('history: lineage and job outputs; persistence after reload', async (
   await page.goto(`${origin}/projects/${project.id}/history`); await page.getByRole('heading', { name: 'Lineage', exact: true }).waitFor(); assert.ok(await page.locator('ul.lineage li').count() >= 3); await page.getByText('envelope.json').first().waitFor();
   await page.reload(); await page.getByRole('heading', { name: 'Lineage', exact: true }).waitFor(); const st = await api('state'); assert.ok(st.variant.some(v => v.approved)); assert.ok(st.annotation.some(a => a.status === 'applied'));
 });
+await step('blind A/B: identities hidden in UI and API until a choice, then revealed and recorded', async () => {
+  const st = await api('state'), fx = st.runner.filter(r => r.type === 'fixture').slice(0, 2), names = fx.map(r => r.name);
+  const nb = await api('board', { project_id: project.id, title: 'Blind test', brief: 'Compare two approaches', screens: ['One', 'Two'] });
+  await api('generate', { project_id: project.id, board_id: nb.id, brief: nb.brief, runner_ids: fx.map(r => r.id), idempotency_key: 'blind-' + Date.now() });
+  await until(async () => (await api('state')).variant.filter(v => v.board_id === nb.id).length === 2, 'blind variants');
+  await page.goto(`${origin}/projects/${project.id}/boards/${nb.id}`); await page.locator('.fframe').first().waitFor();
+  await page.getByRole('button', { name: /Blind compare: off/ }).click(); await page.locator('.blindbar').waitFor();
+  const html = await page.content(); for (const n of names) assert.ok(!html.includes(n), 'runner name leaked into the page: ' + n);
+  assert.ok(html.includes('Option '), 'neutral labels shown'); const raw = JSON.stringify(await api('state')); for (const n of names) assert.ok(!JSON.stringify((await api('state')).variant.filter(v => v.board_id === nb.id)).includes(n), 'runner name leaked via API: ' + n);
+  await page.goto(`${origin}/projects/${project.id}/boards/${nb.id}/compare`); await page.locator('[data-compare-side]').first().waitFor(); assert.ok(!(await page.content()).includes(names[0]) && !(await page.content()).includes(names[1]), 'compare view is blind too');
+  await page.goto(`${origin}/projects/${project.id}/boards/${nb.id}`); await page.locator('[data-blind-pick]').first().click(); await page.locator('#bp-r').fill('clearer'); await page.locator('#modal-form').getByRole('button', { name: 'Choose and reveal' }).click();
+  await page.locator('.blindbar.revealed').waitFor(); assert.match(await page.locator('.blindbar.revealed').textContent(), /You preferred Option [A-Z], which was (Studio|Exploration)/);
+  const b = (await api('state')).board.find(x => x.id === nb.id); assert.ok(b.revealed && b.blind_choice.reason === 'clearer'); assert.ok((await api('state')).variant.some(v => names.includes(v.runner_name)), 'names visible after reveal');
+});
 await step('boards list, archive & restore', async () => {
   await page.goto(`${origin}/projects/${project.id}/boards`); await page.getByRole('heading', { name: 'Boards', exact: true }).waitFor(); assert.ok(await page.locator('.project-card').count() >= 1);
 });

@@ -142,7 +142,7 @@ function generateModal() {
 }
 function approveModal() {
   const { v, b } = current(), checks = checksOf(v), failed = checks.filter(c => c.outcome === 'fail'), open = unresolvedReviews(v);
-  modal('Approve & build prototype', `<p>Approve <strong>${esc(v.runner_name)} v${v.version}</strong> of “${esc(b.title)}”.</p><ul class="tiny"><li>Approval pins this exact version. It stays immutable; later changes create new versions.</li><li>A static click-through bundle is built from it and opens in the player.</li>${v.review_state === 'pending' ? '<li>This revision will be accepted.</li>' : ''}</ul>${failed.length ? `<div class="inline-note warn"><strong>${failed.length} deterministic check${failed.length === 1 ? '' : 's'} failed:</strong> ${failed.map(c => esc(c.check)).join('; ')}.</div>` : ''}${open.length ? `<div class="inline-note warn">${open.length} item${open.length === 1 ? '' : 's'} still need designer review.</div>` : ''}`, 'Approve & build', async () => {
+  modal('Approve & build prototype', `<p>Approve <strong>${esc(v.runner_name)} v${v.version}</strong> of “${esc(b.title)}”.</p><ul class="tiny"><li>Approval pins this exact version. It stays immutable; later changes create new versions.</li><li>A static click-through bundle is built from it and opens in the player.</li>${v.review_state === 'pending' ? '<li>This revision will be accepted.</li>' : ''}${b.blind && !b.revealed ? '<li><strong>Approving counts as your blind choice and reveals runner identities.</strong></li>' : ''}</ul>${failed.length ? `<div class="inline-note warn"><strong>${failed.length} deterministic check${failed.length === 1 ? '' : 's'} failed:</strong> ${failed.map(c => esc(c.check)).join('; ')}.</div>` : ''}${open.length ? `<div class="inline-note warn">${open.length} item${open.length === 1 ? '' : 's'} still need designer review.</div>` : ''}`, 'Approve & build', async () => {
     const res = await api('approve', { id: v.id }); await refresh(false); go(nav('prototypes') + '/' + res.prototype.id); toast('Approved and locked. Prototype built.');
   });
 }
@@ -178,7 +178,7 @@ async function action(name) {
     case 'review': S.tool = 'comment'; if (v) go(boardPath(b, 'review', v.id)); return;
     case 'revise': {
       const ids = S.data.annotation.filter(a => a.variant_id === v.id && a.status !== 'applied' && a.selected !== false).map(a => a.id); if (!ids.length) return toast('Select at least one open pin');
-      await api('revise', { project_id: p.id, board_id: b.id, parent_id: v.id, brief: b.brief, runner_ids: [v.runner_id], annotation_ids: ids, scope_mode: S.regionOnly ? 'region' : 'screen', idempotency_key: crypto.randomUUID() });
+      await api('revise', { project_id: p.id, board_id: b.id, parent_id: v.id, brief: b.brief, runner_ids: v.runner_id ? [v.runner_id] : undefined, annotation_ids: ids, scope_mode: S.regionOnly ? 'region' : 'screen', idempotency_key: crypto.randomUUID() });
       toast('Revision queued; the parent version is preserved'); await refresh(false); go(boardPath(b)); return;
     }
     case 'approve': if (!v) return toast('Generate a variation first'); return approveModal();
@@ -238,6 +238,9 @@ async function onClick(e) {
   const t = e.target, q = sel => t.closest(sel), { b, v } = current(); let el;
   if ((el = q('[data-handoff]'))) return handoff(el.dataset.handoff);
   if ((el = q('[data-action]'))) return action(el.dataset.action);
+  if ((el = q('[data-blind-toggle]'))) { await post('board-blind', { board_id: b.id, blind: el.dataset.blindToggle === 'true' }); toast(el.dataset.blindToggle === 'true' ? 'Blind mode on: runner identities are hidden' : 'Blind mode off'); return refresh(); }
+  if ((el = q('[data-blind-pick]'))) { const id = el.dataset.blindPick, pv = S.data.variant.find(x => x.id === id); return modal('Choose this option', `<p>You are choosing <strong>${esc(pv.runner_name)} v${pv.version}</strong>. Runner identities will be revealed afterwards and your choice is recorded.</p><label for="bp-r">Why? (optional)</label><textarea id="bp-r" name="reason" rows="3" placeholder="e.g. clearer explanation of why we ask for income"></textarea>`, 'Choose and reveal', async f => { const board = await post('blind-choice', { board_id: b.id, variant_id: id, reason: f.get('reason') }); toast(`Revealed: ${board.blind_choice.label ? 'Option ' + board.blind_choice.label + ' was ' : ''}${board.blind_choice.runner_name}`); }); }
+  if ((el = q('[data-blind-reveal]'))) return confirmDialog('Reveal runner identities?', '<p>Without choosing, the comparison ends and you will see which runner made each option. You cannot re-enable blind mode for this board afterwards.</p>', 'Reveal', async () => { await post('blind-choice', { board_id: b.id }); toast('Identities revealed'); });
   if ((el = q('[data-accept]'))) { await post('accept-revision', { id: el.dataset.accept }); toast('Revision accepted'); return refresh(); }
   if ((el = q('[data-revert]'))) { const id = el.dataset.revert, rv = S.data.variant.find(x => x.id === id); return confirmDialog('Revert this revision?', `<p>v${rv.version} stays in history (hidden by default) and the parent version becomes the working version again. Nothing is deleted.</p>`, 'Revert revision', async () => { await post('revert-revision', { id }); S.selectedVariant = rv.parent_id; toast('Reverted to the parent version'); }); }
   if ((el = q('[data-cancel-job]'))) { await post('cancel-job', { id: el.dataset.cancelJob }); toast('Cancelling…'); return refresh(); }
