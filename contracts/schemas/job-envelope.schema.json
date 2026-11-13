@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "id",
+    "project_id",
+    "type",
+    "context",
+    "input_hash",
+    "runner_id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    },
+    "context": {
+      "type": "object"
+    },
+    "input_hash": {
+      "type": "string"
+    },
+    "runner_id": {
+      "type": "string"
+    }
+  }
+}

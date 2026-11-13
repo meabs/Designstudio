@@ -1,0 +1,172 @@
+import sys, tempfile, unittest, time, threading
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'apps/api'))
+import server as s
+
+class LifecycleTest(unittest.TestCase):
+ def setUp(self):
+  self.tmp=tempfile.TemporaryDirectory(); self.old=s.STORE; s.STORE=Path(self.tmp.name); s.seed(); self.p=s.allof('project')[0]; self.b=s.allof('board')[0]; s.CANCEL.clear()
+ def tearDown(self): s.STORE=self.old; self.tmp.cleanup()
+ def run_job(self,kind='generate_board',runner=1,parent=None,annotations=[]):
+  ctx=s.get(self.p['context_id']); j=dict(id=s.uid(),project_id=self.p['id'],type=kind,runner_id=s.allof('runner')[runner]['id'],context=ctx,board_id=self.b['id'],parent_id=parent,annotations=annotations,brief=self.b['brief'],instruction='t',events=[],status='queued',created_at=time.time())
+  s.save('job',j)
+  with patch.object(s.subprocess,'run',return_value=None),patch.object(s.time,'sleep'): s.execute(j)
+  return s.get(j['id'])
+ def variant(self,**kw): return s.get(self.run_job(**kw)['variant_id'])
+ # --- regression: research result must not be overwritten by its own job record
+ def test_research_result_survives_job_completion(self):
+  j=dict(id=s.uid(),project_id=self.p['id'],type='research',runner_id=s.allof('runner')[0]['id'],context=s.get(self.p['context_id']),brief='q',instruction='t',events=[],status='queued',sources=[],created_at=time.time()); s.save('job',j)
+  with patch.object(s.time,'sleep'): s.execute(j)
+  r=[x for x in s.allof('research') if x['project_id']==self.p['id']]; self.assertEqual(len(r),1); self.assertEqual(r[0]['job_id'],j['id']); self.assertEqual(s.get(j['id'])['status'],'succeeded'); self.assertTrue(r[0]['findings'])
+ def test_empty_research_question_rejected(self):
+  with self.assertRaises(ValueError): s.launch({'brief':'  ','runner_ids':[s.allof('runner')[0]['id']]},'research',self.p['id'])
+ # --- context
+ def test_identical_save_returns_same_version(self):
+  c=s.get(self.p['context_id']); again=s.context(self.p['id'],{'markdown':c['markdown'],'tokens':c['tokens'],'rules':[{k:v for k,v in r.items()} for r in c['rules']]}); self.assertEqual(again['id'],c['id']); self.assertEqual(len([x for x in s.allof('context') if x['project_id']==self.p['id']]),1)
+ def test_rule_versions_increment_only_on_change(self):
+  c=s.get(self.p['context_id']); rules=[dict(r) for r in c['rules']]; rules[0]['description']='Changed'; n=s.context(self.p['id'],{'markdown':c['markdown'],'tokens':c['tokens'],'rules':rules})
+  self.assertEqual(n['version'],2); by={r['id']:r['version'] for r in n['rules']}; self.assertEqual(by['CTA-001'],2); self.assertEqual(by['COPY-001'],1)
+ def test_duplicate_or_blank_rule_rejected(self):
+  r=dict(s.RULES[0])
+  with self.assertRaises(ValueError): s.context(self.p['id'],{'rules':[r,dict(r)]})
+  with self.assertRaises(ValueError): s.context(self.p['id'],{'rules':[dict(r,id=' ')]})
+ # --- revision decisions and approval
+ def test_revision_pending_accept_revert_and_lineage(self):
+  parent=self.variant(); a=s.save('annotation',dict(id=s.uid(),variant_id=parent['id'],screen='0',x=.5,y=.2,comment='Move text',status='open',selected=True,created_at=time.time()))
+  job=self.run_job('revise_board',1,parent['id'],[a]); child=s.get(job['variant_id']); self.assertEqual(child['review_state'],'pending'); self.assertEqual(child['changed_screens'],['0']); self.assertIsNone(parent.get('review_state'))
+  self.assertEqual(s.set_review_state(child['id'],'reverted')['review_state'],'reverted'); self.assertEqual(s.get(parent['id'])['id'],parent['id'])
+  with self.assertRaises(ValueError): s.set_review_state(parent['id'],'accepted')
+ def test_reverted_cannot_be_approved_and_approved_cannot_be_reverted(self):
+  parent=self.variant(); a=s.save('annotation',dict(id=s.uid(),variant_id=parent['id'],screen='1',x=.5,y=.5,comment='x',status='open',selected=True,created_at=time.time()))
+  child=s.get(self.run_job('revise_board',1,parent['id'],[a])['variant_id']); s.set_review_state(child['id'],'reverted')
+  with self.assertRaises(ValueError): s.approve(child['id'])
+  child2=s.get(self.run_job('revise_board',1,parent['id'],[s.save('annotation',dict(id=s.uid(),variant_id=parent['id'],screen='0',x=.5,y=.5,comment='y',status='open',selected=True,created_at=time.time()))])['variant_id']); s.approve(child2['id'])
+  with self.assertRaises(ValueError): s.set_review_state(child2['id'],'reverted')
+ def test_approval_is_idempotent_locked_and_builds_isolated_bundle(self):
+  v=self.variant(); r1=s.approve(v['id']); r2=s.approve(v['id']); self.assertEqual(r1['prototype']['id'],r2['prototype']['id']); self.assertEqual(len(s.allof('prototype')),1)
+  bundle=s.STORE/'prototypes'/r1['prototype']['id']; self.assertTrue((bundle/'index.html').is_file()); self.assertIn('nav.js',(bundle/'screens/0.html').read_text())
+  self.assertNotIn('nav.js',(s.STORE/'variants'/v['id']/'screens/0.html').read_text(),'source variant stays untouched')
+  self.assertTrue(s.get(v['id'])['approved'])
+ def test_approving_another_variant_moves_approval_but_keeps_prototypes(self):
+  a=self.variant(runner=0); b=self.variant(runner=1); pa=s.approve(a['id'])['prototype']; s.approve(b['id'])
+  self.assertFalse(s.get(a['id'])['approved']); self.assertTrue(s.get(b['id'])['approved']); self.assertTrue((s.STORE/'prototypes'/pa['id']/'screens/0.html').is_file())
+ # --- annotations
+ def test_only_open_pins_on_parent_can_drive_revision(self):
+  parent=self.variant(); other=self.variant(runner=0); pin=s.save('annotation',dict(id=s.uid(),variant_id=other['id'],screen='0',x=.1,y=.1,comment='c',status='open',selected=True,created_at=time.time()))
+  with self.assertRaises(ValueError): s.launch(dict(board_id=self.b['id'],parent_id=parent['id'],annotation_ids=[pin['id']],runner_ids=[parent['runner_id']]),'revise_board',self.p['id'])
+  with self.assertRaises(ValueError): s.launch(dict(board_id=self.b['id'],parent_id=parent['id'],annotation_ids=[],runner_ids=[parent['runner_id']]),'revise_board',self.p['id'])
+ # --- jobs: cancel, timeout, retry, concurrency
+ def cli_runner(self,exe,args,timeout=30):
+  return s.save('runner',dict(id=s.uid(),name='cli',type='cli',executable=exe,args=args,timeout=timeout,enabled=True))
+ def test_cancel_running_cli_job_saves_no_variant(self):
+  r=self.cli_runner('/bin/sleep',['30']); j=dict(id=s.uid(),project_id=self.p['id'],type='generate_board',runner_id=r['id'],context=s.get(self.p['context_id']),board_id=self.b['id'],parent_id=None,annotations=[],brief='b',instruction='t',events=[],status='queued',created_at=time.time()); s.save('job',j)
+  t=threading.Thread(target=s.execute,args=(j,)); t.start(); time.sleep(.8); s.CANCEL.add(j['id']); t.join(10); self.assertFalse(t.is_alive()); self.assertEqual(s.get(j['id'])['status'],'cancelled'); self.assertEqual(s.allof('variant'),[])
+ def test_timeout_is_distinct_and_keeps_partial_log(self):
+  r=self.cli_runner('/bin/sh',['-c','echo partial; sleep 30'],timeout=1); j=dict(id=s.uid(),project_id=self.p['id'],type='generate_board',runner_id=r['id'],context=s.get(self.p['context_id']),board_id=self.b['id'],parent_id=None,annotations=[],brief='b',instruction='t',events=[],status='queued',created_at=time.time()); s.save('job',j)
+  s.execute(j); self.assertEqual(s.get(j['id'])['status'],'timed_out'); self.assertIn('partial',(s.STORE/'jobs'/j['id']/'runner.log').read_text())
+ def test_retry_reuses_inputs_once(self):
+  r=self.cli_runner('/bin/false',[]); j=dict(id=s.uid(),project_id=self.p['id'],type='generate_board',runner_id=r['id'],context=s.get(self.p['context_id']),board_id=self.b['id'],parent_id=None,annotations=[],brief='b',instruction='t',events=[],status='queued',created_at=time.time(),input_hash='abc'); s.save('job',j); s.execute(j); self.assertEqual(s.get(j['id'])['status'],'failed')
+  with patch.object(s.threading,'Thread'): new=s.retry_job(j['id'])
+  self.assertEqual(new['input_hash'],'abc'); self.assertEqual(new['retry_of'],j['id']); self.assertEqual(s.get(j['id'])['retried_by'],new['id'])
+  with self.assertRaises(ValueError): s.retry_job(j['id'])
+  with self.assertRaises(ValueError): s.retry_job(new['id'])
+ def test_disabled_runner_rejected(self):
+  r=s.allof('runner')[0]; r['enabled']=False; s.save('runner',r)
+  with self.assertRaises(ValueError): s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=[r['id']]),'generate_board',self.p['id'])
+
+
+ # --- reference images
+ PNG=bytes.fromhex('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360f8cfc0f01f0005000201a5f645e60000000049454e44ae426082')
+ def upload(self,raw=None,name='Mood board.png',pid=None):
+  import base64
+  return s.add_reference(dict(project_id=pid or self.p['id'],name=name,data=base64.b64encode(raw or self.PNG).decode()))
+ def test_reference_upload_validates_type_and_size(self):
+  r=self.upload(); self.assertEqual(r['mime'],'image/png'); self.assertTrue((s.STORE/'projects'/self.p['id']/'references'/r['file']).is_file())
+  with self.assertRaises(ValueError): self.upload(b'<svg onload=alert(1)></svg>')
+  with self.assertRaises(ValueError): self.upload(b'\x89PNG\r\n\x1a\n'+b'0'*(s.MAX_REF_BYTES+1))
+  with self.assertRaises(ValueError): s.add_reference(dict(project_id=self.p['id'],data='not base64!!'))
+  self.assertNotIn('/',self.upload(name='../../etc/passwd.png')['name'])
+ def test_references_reach_job_envelope_instruction_and_snapshot(self):
+  r=self.upload(); rec=s.get(r['id']); rec['note']='Use this card layout'; s.save('reference',rec)
+  with patch.object(s.threading,'Thread'): jobs=s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=[x['id'] for x in s.allof('runner')[:2]],reference_ids=[r['id']]),'generate_board',self.p['id'])
+  for j in jobs:
+   self.assertEqual(j['references'][0]['sha256'],r['sha256']); self.assertIn('references/'+r['file'],j['instruction']); self.assertIn('Use this card layout',j['instruction']); self.assertTrue((s.STORE/'jobs'/j['id']/'references'/r['file']).is_file())
+  self.assertEqual(jobs[0]['input_hash'],jobs[1]['input_hash']); self.assertEqual(s.get(self.b['id'])['reference_ids'],[r['id']])
+ def test_references_change_shared_input_hash(self):
+  r=self.upload()
+  with patch.object(s.threading,'Thread'):
+   a=s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=[s.allof('runner')[0]['id']],reference_ids=[]),'generate_board',self.p['id'])[0]
+   b=s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=[s.allof('runner')[0]['id']],reference_ids=[r['id']]),'generate_board',self.p['id'])[0]
+  self.assertNotEqual(a['input_hash'],b['input_hash'])
+ def test_snapshot_survives_library_delete_and_retry(self):
+  r=self.upload(); runner=self.cli_runner('/bin/false',[])
+  with patch.object(s.threading,'Thread'): j=s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=[runner['id']],reference_ids=[r['id']]),'generate_board',self.p['id'])[0]
+  s.execute(j); s.delete_reference(r['id']); self.assertEqual(s.allof('reference'),[])
+  with patch.object(s.threading,'Thread'): new=s.retry_job(j['id'])
+  self.assertTrue((s.STORE/'jobs'/new['id']/'references'/r['file']).is_file())
+ def test_variant_flags_references_for_designer_review(self):
+  r=self.upload(); b=s.get(self.b['id']); b['reference_ids']=[r['id']]; s.save('board',b)
+  with patch.object(s.threading,'Thread'): j=s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=[s.allof('runner')[0]['id']]),'generate_board',self.p['id'])[0]
+  with patch.object(s.subprocess,'run',return_value=None),patch.object(s.time,'sleep'): s.execute(j)
+  v=s.get(s.get(j['id'])['variant_id']); self.assertEqual(len(v['references']),1); self.assertTrue(any(x['check'].startswith('Reference images') and x['outcome']=='review' for x in v['validation']))
+ def test_reference_from_other_project_rejected(self):
+  other=s.project({'name':'Other'}); r=self.upload(pid=other['id'])
+  with self.assertRaises(ValueError): s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=[s.allof('runner')[0]['id']],reference_ids=[r['id']]),'generate_board',self.p['id'])
+
+ # --- hardened validation
+ def pkg(self):
+  v=self.variant(); return v,s.STORE/'variants'/v['id']
+ def test_hostile_content_rejected(self):
+  v,folder=self.pkg(); page=folder/'screens/0.html'; original=page.read_text()
+  cases={'<style>@import "x.css";</style>':'@import','<div style="background:url(https://evil.test/a.png)"></div>':'url','<script>navigator.sendBeacon("/x")</script>':'sendBeacon','<iframe src="screens/1.html"></iframe>':'frame','<script>import("./x.js")</script>':'import','<form action="https://evil.test"></form>':'action','<script>location.href="https://evil.test"</script>':'navigation'}
+  for bad,why in cases.items():
+   page.write_text(original+bad)
+   with self.assertRaises(ValueError,msg=why): s.validate(folder,v['manifest'],[])
+  page.write_text(original); s.validate(folder,v['manifest'],[])
+ def test_external_reference_in_css_or_js_asset_rejected(self):
+  v,folder=self.pkg(); (folder/'assets').mkdir(exist_ok=True)
+  (folder/'assets/theme.css').write_text('body{background:url(//cdn.test/x.png)}')
+  with self.assertRaises(ValueError): s.validate(folder,v['manifest'],[])
+  (folder/'assets/theme.css').write_text('a{color:red}'); (folder/'assets/app.js').write_text('fetch("/api")')
+  with self.assertRaises(ValueError): s.validate(folder,v['manifest'],[])
+ def test_symlink_and_file_count_limits(self):
+  v,folder=self.pkg(); (folder/'assets').mkdir(exist_ok=True); (folder/'assets/link.txt').symlink_to('/etc/hostname')
+  with self.assertRaises(ValueError): s.validate(folder,v['manifest'],[])
+  (folder/'assets/link.txt').unlink()
+  for i in range(s.MAX_PACKAGE_FILES+1): (folder/'assets'/f'f{i}.txt').write_text('x')
+  with self.assertRaises(ValueError): s.validate(folder,v['manifest'],[])
+ def test_unresolved_token_reference_fails_check(self):
+  v,folder=self.pkg(); page=folder/'screens/0.html'; page.write_text(page.read_text()+'<style>p{color:var(--missing-token)}</style>')
+  r=[x for x in s.validate(folder,v['manifest'],[],{'accent':'#000'}) if x['check']=='Token references'][0]; self.assertEqual(r['outcome'],'fail'); self.assertIn('--missing-token',r['evidence'])
+  page.write_text(page.read_text().replace('var(--missing-token)','var(--missing-token,#111)'))
+  self.assertEqual([x for x in s.validate(folder,v['manifest'],[]) if x['check']=='Token references'][0]['outcome'],'pass')
+ def test_manifest_contract_errors_are_specific(self):
+  good=self.variant()['manifest']
+  for mutate,msg in [(lambda m:m.update(kind='x'),'contract'),(lambda m:m.update(screens=[]),'screens'),(lambda m:m['screens'].append(dict(m['screens'][0])),'Duplicate'),(lambda m:m.update(start_screen_id='zzz'),'start_screen_id'),(lambda m:m['edges'].append({'from':'0','to':'9'}),'edge'),(lambda m:m['screens'][0].pop('title'),'title')]:
+   import copy; m=copy.deepcopy(good); mutate(m)
+   with self.assertRaisesRegex(ValueError,msg): s.check_manifest(m)
+ # --- environment allowlist
+ def test_cli_runner_only_sees_allowlisted_environment(self):
+  import os
+  os.environ['STUDIO_TEST_SECRET']='leak-me'; os.environ['STUDIO_TEST_OK']='fine'
+  try:
+   r=s.save('runner',dict(id=s.uid(),name='env',type='cli',executable='/bin/sh',args=['-c','echo secret=$STUDIO_TEST_SECRET ok=$STUDIO_TEST_OK'],timeout=20,enabled=True,env_allowlist=['PATH','STUDIO_TEST_OK']))
+   j=dict(id=s.uid(),project_id=self.p['id'],type='generate_board',runner_id=r['id'],context=s.get(self.p['context_id']),board_id=self.b['id'],parent_id=None,annotations=[],brief='b',instruction='t',events=[],status='queued',created_at=time.time()); s.save('job',j); s.execute(j)
+   log=(s.STORE/'jobs'/j['id']/'runner.log').read_text(); self.assertIn('secret= ',log); self.assertIn('ok=fine',log); self.assertNotIn('leak-me',log)
+  finally: os.environ.pop('STUDIO_TEST_SECRET',None); os.environ.pop('STUDIO_TEST_OK',None)
+ def test_local_agent_configs_carry_auth_env_but_not_everything(self):
+  import local_agents
+  from unittest.mock import patch as p
+  with p.object(local_agents,'discover',return_value=[{'id':'claude','name':'Claude Code','supported':True,'executable':'/x/claude'}]):
+   c=local_agents.configuration('claude','')
+  self.assertIn('ANTHROPIC_API_KEY',c['env_allowlist']); self.assertNotIn('AWS_SECRET_ACCESS_KEY',c['env_allowlist'])
+
+ def test_relative_links_inside_package_allowed_outside_rejected(self):
+  v,folder=self.pkg(); (folder/'assets').mkdir(exist_ok=True); (folder/'assets/theme.css').write_text('a{color:red}'); page=folder/'screens/0.html'; base=page.read_text()
+  page.write_text(base+'<link rel="stylesheet" href="../assets/theme.css">'); s.validate(folder,v['manifest'],[])
+  for bad,msg in [('<a href="../../outside.html">x</a>','outside'),('<img src="/etc/passwd">','outside'),('<script src="../assets/missing.js"></script>','missing')]:
+   page.write_text(base+bad)
+   with self.assertRaisesRegex(ValueError,msg): s.validate(folder,v['manifest'],[])
+
+if __name__=='__main__': unittest.main()

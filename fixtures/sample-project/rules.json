@@ -1,0 +1,30 @@
+[
+  {
+    "id": "CTA-001",
+    "description": "One primary action per screen",
+    "scope": "project",
+    "severity": "error",
+    "verification": "deterministic",
+    "check": "primary_action_count",
+    "parameters": {
+      "max": 1
+    },
+    "enabled": true
+  },
+  {
+    "id": "COMPONENT-001",
+    "description": "Use the supplied component tokens",
+    "scope": "workspace",
+    "severity": "warning",
+    "verification": "human_review",
+    "enabled": true
+  },
+  {
+    "id": "COPY-001",
+    "description": "Explain why sensitive details are requested",
+    "scope": "project",
+    "severity": "warning",
+    "verification": "human_review",
+    "enabled": true
+  }
+]

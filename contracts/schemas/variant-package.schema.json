@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "board_id",
+    "screens",
+    "start_screen_id",
+    "edges"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "clickthrough-static"
+    },
+    "board_id": {
+      "type": "string"
+    },
+    "screens": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "file"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string",
+            "pattern": "^screens/[a-zA-Z0-9_-]+\\.html$"
+          }
+        }
+      }
+    },
+    "start_screen_id": {
+      "type": "string"
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "trigger"
+        ]
+      }
+    }
+  }
+}

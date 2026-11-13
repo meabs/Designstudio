@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "kind": "clickthrough-static",
+  "board_id": "demo",
+  "screens": [
+    {
+      "id": "0",
+      "title": "Eligibility",
+      "file": "screens/0.html"
+    },
+    {
+      "id": "1",
+      "title": "Details",
+      "file": "screens/1.html"
+    },
+    {
+      "id": "2",
+      "title": "Review",
+      "file": "screens/2.html"
+    }
+  ],
+  "start_screen_id": "0",
+  "edges": [
+    {
+      "from": "0",
+      "to": "1",
+      "trigger": "continue"
+    },
+    {
+      "from": "1",
+      "to": "2",
+      "trigger": "continue"
+    }
+  ]
+}

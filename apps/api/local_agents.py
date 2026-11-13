@@ -1,0 +1,31 @@
+"""Discover binaries and non-secret local model metadata. Never read credentials."""
+import json, os, shutil, subprocess
+from pathlib import Path
+
+def discover():
+ result=[]
+ for name in ['codex','claude','opencode','gemini','copilot','aider']:
+  executable=shutil.which(name)
+  if not executable: continue
+  models=[]; source='Manual model ID; availability is checked by the agent when a job runs'
+  if name=='codex':
+   cache=Path(os.environ.get('CODEX_HOME',Path.home()/'.codex'))/'models_cache.json'
+   try:
+    data=json.loads(cache.read_text()); models=[m['slug'] for m in data.get('models',[]) if m.get('slug')]; source='Local Codex model cache (may be stale)'
+   except (OSError,ValueError,KeyError): pass
+  if name=='opencode':
+   try:
+    p=subprocess.run([executable,'models'],capture_output=True,text=True,timeout=8)
+    if p.returncode==0: models=[s for s in p.stdout.splitlines() if '/' in s and len(s)<150]; source='opencode models'
+   except (OSError,subprocess.TimeoutExpired): pass
+  result.append(dict(id=name,name={'codex':'Codex','claude':'Claude Code','opencode':'OpenCode','gemini':'Gemini CLI','copilot':'GitHub Copilot','aider':'Aider'}[name],executable=executable,models=models,model_source=source,supported=name in ['codex','claude','opencode']))
+ return result
+
+def configuration(agent,model):
+ installed=next((a for a in discover() if a['id']==agent),None)
+ if not installed or not installed['supported']: raise ValueError('No supported adapter for this installed agent')
+ if agent=='codex': args=['exec','--skip-git-repo-check','--sandbox','workspace-write']+(['--model',model] if model else [])+['{prompt}']
+ elif agent=='claude': args=['--print','--permission-mode','acceptEdits']+(['--model',model] if model else [])+['{prompt}']
+ else: args=['run']+(['--model',model] if model else [])+['{prompt}']
+ env=['PATH','HOME','USER','LANG','LC_ALL','TERM','TMPDIR','SHELL','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']+{'codex':['CODEX_HOME','OPENAI_API_KEY'],'claude':['CLAUDE_CONFIG_DIR','ANTHROPIC_API_KEY'],'opencode':['OPENCODE_CONFIG']}.get(agent,[])
+ return dict(name=installed['name']+' / '+(model or 'agent default'),type='cli',agent=agent,model=model,executable=installed['executable'],args=args,timeout=300,env_allowlist=env)
