@@ -2,7 +2,7 @@ import sys, tempfile, unittest, time
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'apps/api'))
-import server as s
+import server as s, boards
 
 class OverrideTest(unittest.TestCase):
  def setUp(self):
@@ -10,7 +10,7 @@ class OverrideTest(unittest.TestCase):
   self.r=[r['id'] for r in s.allof('runner')]
  def tearDown(self): s.STORE=self.old; self.tmp.cleanup()
  def launch(self,**kw):
-  with patch.object(s,'enqueue'): return s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=self.r[:2],**kw),'generate_board',self.p['id'])
+  with patch.object(boards,'enqueue'): return s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=self.r[:2],**kw),'generate_board',self.p['id'])
  def test_overrides_stay_out_of_project_context(self):
   before=s.get(self.p['context_id']); jobs=self.launch(overrides=dict(rules=[dict(id='CTA-001',description='Up to three equal actions')],prose='Break the style guide.'))
   self.assertEqual(s.get(self.p['id'])['context_id'],before['id']); self.assertEqual(s.get(before['id'])['effective_rules'],before['effective_rules']); self.assertEqual(len(s.allof('context')),1)
@@ -28,7 +28,7 @@ class OverrideTest(unittest.TestCase):
   j=self.launch(overrides=dict(prose='keep going'))[0]
   with patch.object(s.subprocess,'run',return_value=None),patch.object(s.time,'sleep'): s.execute(j)
   v=s.get(s.get(j['id'])['variant_id']); a=s.save('annotation',dict(id=s.uid(),variant_id=v['id'],screen='0',x=.5,y=.2,comment='c',status='open',selected=True,created_at=time.time()))
-  with patch.object(s,'enqueue'): rj=s.launch(dict(board_id=self.b['id'],parent_id=v['id'],annotation_ids=[a['id']],runner_ids=self.r[:1]),'revise_board',self.p['id'])[0]
+  with patch.object(boards,'enqueue'): rj=s.launch(dict(board_id=self.b['id'],parent_id=v['id'],annotation_ids=[a['id']],runner_ids=self.r[:1]),'revise_board',self.p['id'])[0]
   self.assertIn('keep going',rj['instruction'])
  def test_override_rule_keeps_deterministic_check(self):
   j=self.launch(overrides=dict(rules=[dict(id='CTA-001',description='Up to 3',verification='deterministic',check='primary_action_count',parameters={'max':3})]))[0]

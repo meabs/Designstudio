@@ -7,7 +7,7 @@ A local, single-user design workbench with persistent guidance, research, indepe
 Requirements: Python 3.10+; Google Chrome on PATH as `google-chrome` for rendered screenshot previews. Coding-agent CLIs are optional and use their existing local authentication.
 
 ```sh
-python3 apps/api/server.py
+make run        # or: python3 apps/api/server.py
 ```
 
 Open http://localhost:5173. Optional: `STUDIO_SHARE_PORT=5180` serves read-only prototype share links on a separate port (see the user guide). No package installation or API key is required for fixture mode. SQLite and generated artifacts are stored in `storage/`. Configure `PORT` and `STUDIO_STORAGE` through environment variables if needed.
@@ -70,3 +70,21 @@ STUDIO_URL=http://localhost:5199 node tests/snapshots.mjs   # regenerate docs/sc
 ```
 
 See [Known limitations](KNOWN_LIMITATIONS.md), [decisions](docs/DECISIONS.md) and [runner contract](docs/RUNNER_CONTRACT.md). This is an initial implementation; the full specification acceptance checklist is not yet certified.
+
+## Running it as a POC (no Docker)
+
+| Need | How |
+|---|---|
+| Start / stop | `make run`; Ctrl-C or `SIGTERM` stops workers cleanly. Jobs that were running are marked failed on next start and can be retried; queued jobs resume. |
+| Health | `GET /api/health` → uptime, live workers, queue depth, job counts, free disk, sandbox availability. |
+| Logs | stderr and `storage/studio.log` (rotating, 2 MB x 3). Requests, job errors and unexpected 500s (with a request id returned to the client). No prompts, bodies or agent output are logged. |
+| Backup | `make backup` (SQLite online backup + job/variant/prototype/project files into `backups/<time>/`, safe while running). Restore: stop, point `STUDIO_STORAGE` at the backup folder. |
+| Tests | `make check` (syntax + Python + JS); CI runs the same on push (`.github/workflows/ci.yml`). Browser e2e and real-agent `make doctor AGENT=claude` stay manual. |
+| Access | Binds `127.0.0.1` only and rejects any `Host` that is not `localhost`/`127.0.0.1`/`[::1]` (DNS-rebinding guard; the studio can launch local agents). Add names with `STUDIO_ALLOWED_HOSTS=studio.lan`. The share listener also defaults to loopback; set `STUDIO_SHARE_HOST=0.0.0.0` (plain HTTP, no auth beyond the unguessable token) to let others reach it. |
+| Config | `PORT`, `STUDIO_STORAGE`, `STUDIO_MAX_JOBS`, `STUDIO_SHARE_PORT`, `STUDIO_SHARE_HOST`, `STUDIO_ALLOWED_HOSTS`, `STUDIO_LOG_LEVEL`. |
+
+Not a multi-user deployment: there is no login, so do not expose the studio port beyond your machine.
+
+## Code layout
+
+`apps/api/`: `server.py` (entry point, re-exports), `core.py` (storage, ids, logging), `contexts.py` (projects, versioned guidance and rules), `fixture.py` (fixture runner), `regions.py` (data-design-id diffing), `validation.py` (package checks), `jobs.py` (queue, workers, sandbox, retries, agent report), `references.py`, `research.py`, `boards.py` (boards, blind A/B, launch, overrides, conflict preview), `prototypes.py` (approval, mixing, review), `sharing.py`, `web.py` (HTTP handlers, health, `main`), plus `local_agents.py`, `doctor.py`, `backup.py`. Dependencies only point left to right in that order.

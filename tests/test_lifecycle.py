@@ -2,7 +2,7 @@ import sys, tempfile, unittest, time, threading, json, re
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'apps/api'))
-import server as s
+import server as s, jobs
 
 class LifecycleTest(unittest.TestCase):
  def setUp(self):
@@ -225,7 +225,7 @@ class LifecycleTest(unittest.TestCase):
  def test_scope_violation_is_a_deterministic_failure(self):
   real=s.region_revise
   def sloppy(html_text,notes): return real(html_text,notes).replace('Illustrative prototype only','Rewritten footer')
-  with patch.object(s,'region_revise',side_effect=sloppy): job,child=self.revision_with('heading')
+  with patch.object(jobs,'region_revise',side_effect=sloppy): job,child=self.revision_with('heading')
   chk=[x for x in child['validation'] if x['check'].startswith('Revision scope')]; self.assertEqual([x['outcome'] for x in chk],['fail']); self.assertIn('page content',chk[0]['evidence']); self.assertTrue(child['changed_regions']['0']['outside'])
 
  # --- blind A/B
@@ -348,11 +348,11 @@ class LifecycleTest(unittest.TestCase):
   r=self.cli_runner('/bin/sh',['-c',script]); r.update(sandbox='bwrap',sandbox_ro=[],sandbox_rw=[],**cfg); s.save('runner',r); j=self.run_worker_job(r); s.execute(j); return s.get(j['id']),(s.STORE/'jobs'/j['id'])
  def test_sandbox_command_shape(self):
   from unittest.mock import patch as p
-  with p.object(s,'bwrap_ok',return_value=True):
+  with p.object(jobs,'bwrap_ok',return_value=True):
    cmd=s.sandbox_command(dict(sandbox_ro=['/opt/x'],sandbox_rw=['~/.agent']),['agent','run'],s.STORE/'jobs'/'j1')
   self.assertEqual(cmd[0],'bwrap'); self.assertIn('--tmpfs',cmd); self.assertEqual(cmd[-2:],['agent','run']); self.assertIn('--unshare-pid',cmd); self.assertIn('--die-with-parent',cmd)
   self.assertIn('--ro-bind-try',cmd); self.assertIn('--bind-try',cmd); self.assertNotIn('--unshare-net',cmd)
-  with p.object(s,'bwrap_ok',return_value=False), self.assertRaisesRegex(ValueError,'bubblewrap'): s.sandbox_command({},['x'],s.STORE)
+  with p.object(jobs,'bwrap_ok',return_value=False), self.assertRaisesRegex(ValueError,'bubblewrap'): s.sandbox_command({},['x'],s.STORE)
  @unittest.skipUnless(s.bwrap_ok(),'bubblewrap not usable here')
  def test_sandbox_hides_storage_and_home_and_blocks_writes_but_keeps_job_dir(self):
   other=s.STORE/'jobs'/'other'; other.mkdir(parents=True); (other/'secret.txt').write_text('TOPSECRET'); (s.STORE/'studio-note.txt').write_text('NOTE')
@@ -428,10 +428,10 @@ class LifecycleTest(unittest.TestCase):
  def test_every_prototype_frame_lets_generated_forms_fire_submit_events_but_never_post(self):
   # Agent-built flows use <form> + a JS submit handler; a sandbox without allow-forms never fires that event.
   root=Path(__file__).resolve().parents[1]
-  for rel in ('apps/web/views.js','apps/web/app.js','apps/api/server.py'):
+  for rel in ['apps/web/views.js','apps/web/app.js']+[str(f.relative_to(root)) for f in sorted((root/'apps/api').glob('*.py'))]:
    text=(root/rel).read_text(); frames=re.findall(r'sandbox="([^"]*)"',text)
    for f in frames:
     if 'allow-scripts' in f: self.assertIn('allow-forms',f,rel); self.assertNotIn('allow-same-origin',f,rel)
-  self.assertIn('allow-forms',s.SHARE_PLAYER); self.assertIn("form-action 'none'",(root/'apps/api/server.py').read_text())
+  self.assertIn('allow-forms',s.SHARE_PLAYER); self.assertIn("form-action 'none'",(root/'apps/api/web.py').read_text())
 
 if __name__=='__main__': unittest.main()
