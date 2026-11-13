@@ -142,6 +142,27 @@ def region_revise(html_text,notes):
   if close<0: return None
   html_text=html_text[:a]+seg[:close]+f' <small class="revision-note" data-revised="{html.escape(did)}">· {html.escape(comment)}</small>'+seg[close:]+html_text[b:]
  return html_text
+def hidden_job_file(path):
+ # While a board is blind, files that reveal the runner (envelope, runner log, raw agent output) are withheld; the task text and references are identical for every runner.
+ m=re.match(r'/assets/jobs/([0-9a-f]+)/(.*)$',path)
+ if not m: return False
+ try: j=get(m.group(1)); b=get(j['board_id']) if j.get('board_id') else None
+ except ValueError: return False
+ return bool(b and b.get('blind') and not b.get('revealed') and not (m.group(2)=='TASK.md' or m.group(2).startswith('references/')))
+def stamp_anchors(html_text):
+ # Adds data-design-id to common elements when an agent emitted none, so pins can target elements. Returns (html, count).
+ if 'data-design-id' in html_text: return html_text,0
+ tags={'h1','h2','h3','h4','h5','h6','p','a','button','label','input','select','textarea','img','form','section','article','header','footer','main','nav','aside','ul','ol','li','table','figure','details','summary'}
+ starts=[0]+[m.end() for m in re.finditer('\n',html_text)]; spots=[]; counts={}
+ class P(HTMLParser):
+  def handle_starttag(self,tag,attrs):
+   if tag not in tags: return
+   text=self.get_starttag_text(); line,col=self.getpos(); a=starts[line-1]+col; end=a+len(text)-1
+   if text.endswith('/>'): end-=1
+   counts[tag]=counts.get(tag,0)+1; spots.append((end,f' data-design-id="auto-{tag}-{counts[tag]}"'))
+ P(convert_charrefs=False).feed(html_text)
+ for pos,attr in sorted(spots,reverse=True): html_text=html_text[:pos]+attr+html_text[pos:]
+ return html_text,len(spots)
 MAX_PACKAGE_FILES=200; MAX_PACKAGE_BYTES=20_000_000
 EXTERNAL_PATTERNS=[(r'(?:src|href|action|poster|data)\s*=\s*["\']?\s*(?:https?:)?//','external URL in an attribute'),(r'url\(\s*["\']?\s*(?:https?:)?//','external URL in CSS url()'),(r'@import\b','CSS @import'),
  (r'\b(?:fetch|XMLHttpRequest|WebSocket|EventSource)\s*\(',"network call"),(r'sendBeacon\s*\(','network call (sendBeacon)'),(r'\bimport\s*\(|\bimport\s+[^;]*\bfrom\s+["\']',"dynamic or module import"),
@@ -309,12 +330,18 @@ def _execute(j):
     if not (source/'manifest.json').is_file(): raise ValueError('The agent finished without writing output/manifest.json ('+(f'it wrote {len(written)} other file(s): '+', '.join(written[:6]) if written else 'it wrote no files')+'). Open runner.log in the job history to see what it said.')
     try: manifest_check=json.loads((source/'manifest.json').read_text())
     except ValueError as e: raise ValueError('output/manifest.json is not valid JSON: '+str(e))
-    shutil.copytree(source,folder,dirs_exist_ok=True); manifest=manifest_check
+    shutil.copytree(source,folder,dirs_exist_ok=True); manifest=manifest_check; variant['anchors_added']={}
+    for sd in manifest.get('screens',[]):
+     pf=folder/sd.get('file','')
+     if pf.is_file() and not pf.is_symlink() and pf.suffix=='.html':
+      new,n=stamp_anchors(pf.read_text(errors='replace'))
+      if n: pf.write_text(new); variant['anchors_added'][sd['id']]=n
    (folder/'manifest.json').write_text(json.dumps(manifest,indent=2)); variant['manifest']=manifest
    check_manifest(manifest)
    if {s['id'] for s in manifest['screens']}!={str(i) for i in range(len(board['screens']))}: raise ValueError('Screen IDs must be zero-based strings')
    if len(manifest['screens'])!=len(board['screens']): raise ValueError('Missing requested screens')
    variant['validation']=validate(folder,manifest,ctx['effective_rules'],ctx['tokens'])
+   if variant.get('anchors_added'): variant['validation'].append(dict(check='Annotation anchors added by the studio',outcome='review',evidence='The agent emitted no data-design-id on '+str(len(variant['anchors_added']))+' screen(s), so the studio added '+str(sum(variant['anchors_added'].values()))+' anchors (auto-<tag>-<n>) to make pins and region revisions possible. Markup is otherwise unchanged.'))
    if variant['references']: variant['validation'].append(dict(check=f"Reference images ({len(variant['references'])})",outcome='review',evidence=('Recorded with the job, but the fixture runner cannot interpret images. Use a local coding agent to apply them.' if runner['type']=='fixture' else 'Passed to the agent as files. Whether they were applied needs your judgement; this is not verified.')))
    if runner['type']=='fixture':
     variant['validation'].append(dict(check='Fixture guidance support',outcome='review',evidence='Template demo: supports tokens and explicit text/background/button color directives. Other prose rules need a local coding agent; no general rule conformance is claimed.'))
@@ -379,6 +406,23 @@ def approve(variant_id):
  return dict(variant=v,prototype=proto)
 # ---- mixing: compose one new immutable version from screens of different versions ----
 LINK_RE=re.compile(r'(href|src|poster|action)\s*=\s*(["\'])([^"\']*)\2',re.I)
+def style_fingerprint(folder,page):
+ text=page.read_text(errors='replace')
+ for link in re.findall(r'<link[^>]+href\s*=\s*["\']([^"\']+\.css)[^"\']*["\']',text,re.I):
+  f=(page.parent/link).resolve()
+  if f.is_file() and f.is_relative_to(folder.resolve()): text+=f.read_text(errors='replace')
+ fonts=re.findall(r'font-family\s*:\s*([^;}{]+)',text,re.I); first=lambda x: re.split(r',',x)[0].strip().strip('"\'').lower()
+ hexes={}
+ for h in re.findall(r'#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b',text): hexes[h.lower()]=hexes.get(h.lower(),0)+1
+ return dict(font=first(fonts[0]) if fonts else None,colors=[h for h,_ in sorted(hexes.items(),key=lambda x:-x[1])[:3]])
+def mix_consistency(folder,entries,provenance):
+ prints={e['id']:style_fingerprint(folder,folder/e['file']) for e in entries}
+ fonts={p['font'] for p in prints.values() if p['font']}; palettes=[set(p['colors']) for p in prints.values()]
+ problems=[]
+ if len(fonts)>1: problems.append('different primary fonts: '+', '.join(sorted(fonts)))
+ if palettes and len(set.intersection(*palettes))==0 and all(palettes): problems.append('no dominant colour is shared by every screen')
+ detail='; '.join(f"screen {e['id']} ({next(p['name'] for p in provenance if p['screen']==e['id'])}): {prints[e['id']]['font'] or 'no font set'}, {', '.join(prints[e['id']]['colors']) or 'no colours'}" for e in entries)
+ return dict(check='Cross-screen consistency (heuristic)',outcome='review',evidence=(('Possible inconsistencies: '+'; '.join(problems)+'. ') if problems else 'No differences in primary font or dominant colours were detected. ')+'This compares CSS text only and is not a visual review. '+detail)
 def mix_variants(board_id,picks):
  board=get(board_id); ids=[str(i) for i in range(len(board['screens']))]
  if not isinstance(picks,dict) or set(map(str,picks))!=set(ids): raise ValueError('Choose a source version for every screen')
@@ -424,7 +468,7 @@ def mix_variants(board_id,picks):
   manifest=dict(schema_version='1.0',kind='clickthrough-static',board_id=board_id,start_screen_id=first.get('start_screen_id',ids[0]) if first.get('start_screen_id') in ids else ids[0],screens=entries,edges=[e for e in edges if e['from'] in ids and e['to'] in ids])
   (folder/'manifest.json').write_text(json.dumps(manifest,indent=2))
   validation=validate(folder,manifest,ctx['effective_rules'],ctx['tokens'])
-  names=sorted({p['name']+' v'+str(p['version']) for p in provenance})
+  validation.append(mix_consistency(folder,entries,provenance)); names=sorted({p['name']+' v'+str(p['version']) for p in provenance})
   validation.append(dict(check='Mixed provenance',outcome='review',evidence='Screens come from '+', '.join(names)+'. Visual and copy consistency across screens is not checked automatically.'))
   if len({c['id'] for c in ctxs})>1: validation.append(dict(check='Mixed context versions',outcome='review',evidence='Sources were generated under different guideline versions (v'+', v'.join(str(c.get('version','?')) for c in sorted(ctxs,key=lambda c:c['created_at']))+'); the newest is recorded.'))
   for sid in ids:
@@ -609,6 +653,7 @@ class Handler(SimpleHTTPRequestHandler):
      if not proto: z.writestr('index.html',f'<meta http-equiv="refresh" content="0;url=screens/{v["manifest"]["start_screen_id"]}.html">')
     self.send_response(200); self.send_header('Content-Type','application/zip'); self.send_header('Content-Disposition','attachment; filename="prototype.zip"'); self.end_headers(); return self.wfile.write(buf.getvalue())
    if path.startswith('/assets/'):
+    if hidden_job_file(path): return self.send_json({'message':'Hidden while this comparison is blind'},403)
     f=safe_path(STORE,path[len('/assets/'):])
    else: f=safe_path(ROOT/'apps/web',path.lstrip('/')) if '.' in path.split('/')[-1] else ROOT/'apps/web/index.html'
    if not f.is_file(): return self.send_error(404)

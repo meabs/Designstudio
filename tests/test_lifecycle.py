@@ -302,4 +302,30 @@ class LifecycleTest(unittest.TestCase):
   with patch.object(s.subprocess,'run',return_value=None),patch.object(s.time,'sleep'): s.execute(s.get(job['id']))
   child=s.get(s.get(job['id'])['variant_id']); self.assertEqual(child['parent_id'],m['id'])
 
+ # --- limitation fixes
+ def test_blind_withholds_runner_revealing_job_files_until_reveal(self):
+  vs=self.blind_board(); jid=vs[0]['job_id']
+  for name in ('envelope.json','runner.log','output/manifest.json'): self.assertTrue(s.hidden_job_file(f'/assets/jobs/{jid}/{name}'),name)
+  self.assertFalse(s.hidden_job_file(f'/assets/jobs/{jid}/TASK.md')); self.assertFalse(s.hidden_job_file(f'/assets/jobs/{jid}/references/x.png')); self.assertFalse(s.hidden_job_file('/assets/variants/abc/manifest.json'))
+  s.blind_choice(self.b['id']); self.assertFalse(s.hidden_job_file(f'/assets/jobs/{jid}/envelope.json'))
+ def test_stamp_anchors_adds_ids_only_when_missing_and_keeps_markup_valid(self):
+  doc='<html><body><main><h1>Title</h1><p class="x">Text <a href="1.html">next</a></p><img src="a.png"/><input name="n"><ul><li>One</li></ul></main></body></html>'
+  out,n=s.stamp_anchors(doc); self.assertEqual(n,8); self.assertIn('<h1 data-design-id="auto-h1-1">',out); self.assertIn('<img src="a.png" data-design-id="auto-img-1"/>',out); self.assertIn('<input name="n" data-design-id="auto-input-1">',out)
+  import re as _re; self.assertEqual(_re.sub(r' data-design-id="[^"]+"','',out),doc); self.assertEqual(set(s.element_spans(out)),{'auto-main-1','auto-h1-1','auto-p-1','auto-a-1','auto-img-1','auto-input-1','auto-ul-1','auto-li-1'})
+  again,m=s.stamp_anchors(out); self.assertEqual((again,m),(out,0)); self.assertEqual(s.diff_regions(out,out.replace('Title','New')),{'elements':['auto-h1-1'],'outside':False})
+ def test_agent_output_without_anchors_gets_them_and_is_flagged(self):
+  script='mkdir -p output/screens; for i in 0 1 2; do n=$(( (i+1) % 3 )); printf "<!doctype html><html><body><h1>Screen $i</h1><p>copy</p><a href=\\"$n.html\\">go</a></body></html>" > output/screens/$i.html; done; printf \'{"schema_version":"1.0","kind":"clickthrough-static","board_id":"b","start_screen_id":"0","screens":[{"id":"0","title":"A","file":"screens/0.html"},{"id":"1","title":"B","file":"screens/1.html"},{"id":"2","title":"C","file":"screens/2.html"}],"edges":[]}\' > output/manifest.json'
+  r=self.cli_runner('/bin/sh',['-c',script]); j=dict(id=s.uid(),project_id=self.p['id'],type='generate_board',runner_id=r['id'],context=s.get(self.p['context_id']),board_id=self.b['id'],parent_id=None,annotations=[],brief='b',instruction='t',events=[],status='queued',created_at=time.time()); s.save('job',j)
+  with patch.object(s.subprocess,'run',return_value=None): s.execute(j)
+  j2=s.get(j['id']); self.assertEqual(j2['status'],'succeeded',j2['events'][-1]['message']); v=s.get(j2['variant_id'])
+  self.assertEqual(v['anchors_added'],{'0':3,'1':3,'2':3}); self.assertIn('data-design-id',(s.STORE/'variants'/v['id']/'screens/0.html').read_text())
+  self.assertTrue(any(c['check'].startswith('Annotation anchors added') and c['outcome']=='review' for c in v['validation'])); self.assertTrue(any(c['check'].startswith('Stable targets') and c['outcome']=='pass' for c in v['validation']))
+ def test_mix_consistency_flags_different_fonts_and_never_claims_a_pass(self):
+  a,b=self.two()
+  for v,font in ((a,'Georgia'),(b,'Inter')):
+   for sid in '012':
+    f=s.STORE/'variants'/v['id']/'screens'/f'{sid}.html'; f.write_text(f.read_text()+f'<style>body{{font-family:{font},serif}}</style>')
+  m=s.mix_variants(self.b['id'],{'0':a['id'],'1':b['id'],'2':a['id']}); c=[x for x in m['validation'] if x['check'].startswith('Cross-screen consistency')][0]
+  self.assertEqual(c['outcome'],'review'); self.assertIn('different primary fonts: georgia, inter',c['evidence']); self.assertIn('not a visual review',c['evidence'])
+
 if __name__=='__main__': unittest.main()
