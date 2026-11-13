@@ -101,6 +101,7 @@ await step('review: variant route, pin with stable element anchor, edit & delete
 await step('revise → child version pending; parent untouched; changed screens flagged; revert then re-revise and accept', async () => {
   await page.getByRole('button', { name: /Revise selection \(1 pin\)/ }).click(); await page.locator('.variant').first().waitFor();
   const child = await until(async () => (await api('state')).variant.find(v => v.parent_id === parentVariant.id), 'revision'); revisionId = child.id;
+  assert.ok(child.revision_scope['0'], 'revision records its scope'); assert.ok(child.changed_regions['0'].elements.length > 0, 'changed regions recorded');
   assert.equal(child.review_state, 'pending'); assert.equal(child.references.length, 2, 'revisions inherit the board references'); assert.deepEqual(child.changed_screens, ['0']);
   await page.goto(`${origin}/projects/${project.id}/boards/${board.id}`); await page.locator(`[data-variant="${child.id}"]`).waitFor();
   await page.locator(`[data-variant="${child.id}"] [data-revert]`).click(); await page.locator('#modal-form').getByRole('button', { name: 'Revert revision' }).click();
@@ -111,7 +112,7 @@ await step('revise → child version pending; parent untouched; changed screens 
   await page.getByRole('button', { name: /Revise selection/ }).click();
   const child2 = await until(async () => (await api('state')).variant.find(v => v.parent_id === parentVariant.id && v.id !== child.id), 'second revision'); revisionId = child2.id;
   await page.goto(`${origin}/projects/${project.id}/boards/${board.id}/compare?left=${parentVariant.id}&right=${child2.id}`); await page.getByText('Changed in this screen').waitFor();
-  await page.goto(`${origin}/projects/${project.id}/boards/${board.id}/review/${child2.id}`); await page.getByRole('button', { name: /Before \(v/ }).click(); await page.locator('#pin-area img').waitFor();
+  await page.goto(`${origin}/projects/${project.id}/boards/${board.id}/review/${child2.id}`); await page.locator('.regions .region').first().waitFor(); assert.ok(await page.locator('.regions .region').count() >= 1, 'changed regions outlined'); await page.getByRole('button', { name: /Before \(v/ }).click(); await page.locator('#pin-area img').waitFor();
   await page.getByRole('button', { name: /Accept revision/ }).click(); await until(async () => (await api('state')).variant.find(v => v.id === child2.id).review_state === 'accepted', 'accepted');
 });
 await step('checks: deterministic evidence separate; human review can be completed', async () => {

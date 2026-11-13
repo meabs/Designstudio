@@ -28,6 +28,7 @@ function draw() {
   if (location.hash && !same) document.getElementById(location.hash.slice(1))?.scrollIntoView();
   if (r.view === 'prototypes') S.playerFile = null;
   if (S.fitPending && document.querySelector('.frames,.review-area')) { S.fitPending = false; const z = Math.max(ZMIN, Math.min(100, fitZoom())); if (z !== S.zoom) { S.zoom = z; return draw(); } }
+  overlayRegions();
   if (S.scrollTo) { document.getElementById(S.scrollTo)?.scrollIntoView({ block: 'nearest', inline: 'center' }); S.scrollTo = ''; }
 }
 function updateResearch() {
@@ -63,6 +64,24 @@ function elementAt(v, screenId, x, y) {
     f.onload = () => { try { finish(f.contentDocument.elementFromPoint(x * 720, y * 960)?.closest('[data-design-id]')?.dataset.designId || null); } catch { finish(null); } };
     f.src = live(v, screenId); document.body.appendChild(f); setTimeout(() => finish(null), 4000);
   });
+}
+
+// Outline the elements a revision changed. Geometry comes from a hidden, script-disabled frame at screenshot size.
+function elementRects(v, screenId, ids) {
+  const key = `${v.id}:${screenId}`; if (S.regionCache[key]) return Promise.resolve(S.regionCache[key]);
+  return new Promise(resolve => {
+    const f = document.createElement('iframe'); let done = false;
+    const finish = r => { if (done) return; done = true; f.remove(); S.regionCache[key] = r; resolve(r); };
+    f.setAttribute('sandbox', 'allow-same-origin'); f.setAttribute('aria-hidden', 'true'); f.tabIndex = -1; f.style.cssText = 'position:fixed;left:-9999px;top:0;width:720px;height:960px;border:0;visibility:hidden';
+    f.onload = () => { try { const d = f.contentDocument, out = {}; d.querySelectorAll('[data-design-id]').forEach(el => { const r = el.getBoundingClientRect(); out[el.dataset.designId] = { x: r.left / 720, y: r.top / 960, w: r.width / 720, h: r.height / 960 }; }); finish(out); } catch { finish({}); } };
+    f.src = live(v, screenId); document.body.appendChild(f); setTimeout(() => finish({}), 4000);
+  });
+}
+async function overlayRegions() {
+  const box = document.querySelector('[data-region-ids]'); if (!box) return;
+  const v = S.data.variant.find(x => x.id === box.dataset.regionVariant), ids = box.dataset.regionIds.split(',').filter(Boolean); if (!v || !ids.length) return;
+  const rects = await elementRects(v, box.dataset.regionScreen, ids), host = document.querySelector('[data-region-ids]'); if (!host || host !== box) return;
+  box.innerHTML = ids.filter(id => rects[id] && rects[id].y < 1).map(id => { const r = rects[id]; return `<div class="region" style="left:${r.x * 100}%;top:${r.y * 100}%;width:${r.w * 100}%;height:${Math.min(r.h, 1 - r.y) * 100}%"><span>${esc(id)}</span></div>`; }).join('');
 }
 
 /* ---------- context drafts ---------- */
@@ -159,7 +178,7 @@ async function action(name) {
     case 'review': S.tool = 'comment'; if (v) go(boardPath(b, 'review', v.id)); return;
     case 'revise': {
       const ids = S.data.annotation.filter(a => a.variant_id === v.id && a.status !== 'applied' && a.selected !== false).map(a => a.id); if (!ids.length) return toast('Select at least one open pin');
-      await api('revise', { project_id: p.id, board_id: b.id, parent_id: v.id, brief: b.brief, runner_ids: [v.runner_id], annotation_ids: ids, idempotency_key: crypto.randomUUID() });
+      await api('revise', { project_id: p.id, board_id: b.id, parent_id: v.id, brief: b.brief, runner_ids: [v.runner_id], annotation_ids: ids, scope_mode: S.regionOnly ? 'region' : 'screen', idempotency_key: crypto.randomUUID() });
       toast('Revision queued; the parent version is preserved'); await refresh(false); go(boardPath(b)); return;
     }
     case 'approve': if (!v) return toast('Generate a variation first'); return approveModal();
@@ -284,6 +303,8 @@ document.addEventListener('input', e => {
 document.addEventListener('change', async e => {
   try {
     const t = e.target, d = t.dataset;
+    if (t.matches('[data-region-only]')) { S.regionOnly = t.checked; return draw(); }
+    if (t.matches('[data-show-regions]')) { S.showRegions = t.checked; return draw(); }
     if (t.matches('[data-ref-upload]')) { const files = [...t.files]; t.value = ''; return await uploadRefs(files); }
     if (t.matches('.refitem input')) return t.closest('.refitem').classList.toggle('on', t.checked);
     if (d.refName !== undefined || d.refNote !== undefined) { const id = d.refName ?? d.refNote; await post('reference-update', { id, [d.refName !== undefined ? 'name' : 'note']: t.value }); return refresh(false); }

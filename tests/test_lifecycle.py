@@ -197,4 +197,35 @@ class LifecycleTest(unittest.TestCase):
    self.assertEqual([s.get(j['id'])['status'] for j in jobs],['succeeded']*4); self.assertEqual(len(s.allof('variant')),4)
   finally: s.stop_workers(); self.drain()
 
+ # --- per-region revisions
+ DOC='<html>\n<body>\n<main data-design-id="card"><h1 data-design-id="heading">Hello <b>there</b></h1><p>Body</p><img data-design-id="logo" src="a.png"><a data-design-id="cta" href="#">Go</a></main>\n<footer>Foot</footer></body></html>'
+ def test_element_spans_handle_nesting_and_void_tags(self):
+  sp=s.element_spans(self.DOC); self.assertEqual(set(sp),{'card','heading','logo','cta'}); a,b=sp['heading']; self.assertEqual(self.DOC[a:b],'<h1 data-design-id="heading">Hello <b>there</b></h1>')
+  a,b=sp['logo']; self.assertEqual(self.DOC[a:b],'<img data-design-id="logo" src="a.png">'); self.assertTrue(sp['card'][0]<sp['heading'][0]<sp['heading'][1]<sp['card'][1])
+ def test_diff_attributes_change_to_innermost_element(self):
+  after=self.DOC.replace('Hello','Howdy'); d=s.diff_regions(self.DOC,after); self.assertEqual(d,{'elements':['heading'],'outside':False})
+  d=s.diff_regions(self.DOC,self.DOC.replace('Foot','Changed footer')); self.assertEqual(d,{'elements':[],'outside':True})
+  self.assertEqual(s.diff_regions(self.DOC,self.DOC.replace('Body','New body text')),{'elements':['card'],'outside':False})
+  self.assertEqual(s.diff_regions(self.DOC,self.DOC.replace('>Go<','>Go now<'))['elements'],['cta']); self.assertEqual(s.diff_regions(self.DOC,self.DOC),{'elements':[],'outside':False})
+ def test_region_revise_edits_only_the_pinned_element(self):
+  out=s.region_revise(self.DOC,{'heading':'Shorter'}); self.assertEqual(s.diff_regions(self.DOC,out),{'elements':['heading'],'outside':False}); self.assertIn('Shorter',out)
+  self.assertIsNone(s.region_revise(self.DOC,{'missing':'x'}))
+ def revision_with(self,element_id,scope_mode='region'):
+  parent=self.variant(); pin=s.save('annotation',dict(id=s.uid(),variant_id=parent['id'],screen='0',x=.5,y=.2,comment='Tighten the heading',element_id=element_id,status='open',selected=True,created_at=time.time()))
+  with patch.object(s.threading,'Thread'): job=s.launch(dict(board_id=self.b['id'],parent_id=parent['id'],annotation_ids=[pin['id']],runner_ids=[parent['runner_id']],scope_mode=scope_mode),'revise_board',self.p['id'])[0]
+  with patch.object(s.subprocess,'run',return_value=None),patch.object(s.time,'sleep'): s.execute(s.get(job['id']))
+  return job,s.get(s.get(job['id'])['variant_id'])
+ def test_region_scope_limits_change_and_passes_check(self):
+  job,child=self.revision_with('heading'); self.assertEqual(job['scope'],{'0':{'mode':'region','elements':['heading']}}); self.assertIn('change ONLY the element',job['instruction'])
+  self.assertEqual(child['changed_regions'],{'0':{'elements':['heading'],'outside':False}})
+  chk=[x for x in child['validation'] if x['check'].startswith('Revision scope')]; self.assertEqual([x['outcome'] for x in chk],['pass'])
+ def test_unanchored_pin_or_screen_mode_revises_whole_screen(self):
+  job,child=self.revision_with(None); self.assertEqual(job['scope'],{'0':{'mode':'screen'}}); self.assertIn('may change the whole screen',job['instruction']); self.assertIn('explanation',child['changed_regions']['0']['elements'])
+  job2,_=self.revision_with('heading','screen'); self.assertEqual(job2['scope'],{'0':{'mode':'screen'}})
+ def test_scope_violation_is_a_deterministic_failure(self):
+  real=s.region_revise
+  def sloppy(html_text,notes): return real(html_text,notes).replace('Illustrative prototype only','Rewritten footer')
+  with patch.object(s,'region_revise',side_effect=sloppy): job,child=self.revision_with('heading')
+  chk=[x for x in child['validation'] if x['check'].startswith('Revision scope')]; self.assertEqual([x['outcome'] for x in chk],['fail']); self.assertIn('page content',chk[0]['evidence']); self.assertTrue(child['changed_regions']['0']['outside'])
+
 if __name__=='__main__': unittest.main()

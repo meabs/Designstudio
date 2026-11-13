@@ -5,7 +5,7 @@ which contract stage passes or fails. Uses a temporary storage directory; never 
 
 --guidance runs a second job with a changed accent token and checks the output actually reflects it
 (guidance must change generation, not just be displayed)."""
-import argparse, sys, tempfile, time, json
+import argparse, re, sys, tempfile, time, json
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import server as s, local_agents
@@ -33,7 +33,7 @@ def report(label, j, started):
     return ok
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('agent'); ap.add_argument('--model', default=''); ap.add_argument('--timeout', type=int, default=600); ap.add_argument('--guidance', action='store_true'); ap.add_argument('--references', action='store_true', help='also check the agent actually reads a reference image'); ap.add_argument('--keep', action='store_true', help='keep the temporary storage for inspection')
+    ap = argparse.ArgumentParser(); ap.add_argument('agent'); ap.add_argument('--model', default=''); ap.add_argument('--timeout', type=int, default=600); ap.add_argument('--guidance', action='store_true'); ap.add_argument('--region', action='store_true', help='also check a pinned-element revision changes only that element'); ap.add_argument('--references', action='store_true', help='also check the agent actually reads a reference image'); ap.add_argument('--keep', action='store_true', help='keep the temporary storage for inspection')
     a = ap.parse_args(); s.start_workers(); tmp = tempfile.TemporaryDirectory(); s.STORE = Path(tmp.name); s.seed()
     p = s.allof('project')[0]; b = s.allof('board')[0]
     try: cfg = local_agents.configuration(a.agent, a.model)
@@ -53,6 +53,20 @@ def main():
             used, differs = '#c2185b' in txt(v2), txt(v1) != txt(v2)
             print(f"\n== guidance check: output differs={differs}, new accent #c2185b present={used}"); ok = ok and differs and used
         else: ok = False
+    if ok and a.region:
+        base = s.get(s.get(j['id'])['variant_id']); html0 = (s.STORE / 'variants' / base['id'] / 'screens' / '0.html').read_text(errors='replace'); ids = list(s.element_spans(html0))
+        target = next((i for i in ids if re.search(r'head|title|h1', i, re.I)), ids[0] if ids else None)
+        if not target: print('\n== region check: SKIPPED (the agent output has no data-design-id elements to pin)'); ok = False
+        else:
+            pin = s.save('annotation', dict(id=s.uid(), variant_id=base['id'], screen='0', x=.5, y=.2, comment='Change this element\'s text to exactly "Quietly Certain".', element_id=target, status='open', selected=True, created_at=time.time()))
+            t = time.time(); jr = s.launch(dict(board_id=b['id'], parent_id=base['id'], annotation_ids=[pin['id']], runner_ids=[runner['id']], brief=b['brief']), 'revise_board', p['id'])[0]
+            okr = report(f'region revision of element "{target}"', wait(jr['id'], a.timeout), t)
+            if okr:
+                child = s.get(s.get(jr['id'])['variant_id']); scope = [c for c in child['validation'] if c['check'].startswith('Revision scope')]
+                changed = 'quietly certain' in (s.STORE / 'variants' / child['id'] / 'screens' / '0.html').read_text(errors='replace').lower()
+                for c in scope: print(f"   - {c['outcome']}: {c['check']} — {c['evidence']}")
+                print(f"\n== region check: text changed={changed}, scope check passed={bool(scope) and all(c['outcome']=='pass' for c in scope)}"); ok = ok and changed and bool(scope) and all(c['outcome'] == 'pass' for c in scope)
+            else: ok = False
     if ok and a.references:
         import base64, subprocess, os
         word = 'PINEAPPLE-42'; html = Path(tmp.name) / 'ref.html'; png = Path(tmp.name) / 'ref.png'

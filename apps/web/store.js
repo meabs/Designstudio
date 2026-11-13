@@ -2,7 +2,7 @@
 export const S = {
   data: { project: [], context: [], board: [], variant: [], job: [], research: [], annotation: [], runner: [], prototype: [], reference: [] },
   agents: [], screen: '0', selectedVariant: '', device: 'desktop', zoom: 100, showReverted: false, showBefore: false,
-  activePin: '', inspTab: 'design', tool: 'comment', scrollTo: '', fitPending: true, histFilter: 'all', draft: null, draftFor: '', busy: false,
+  activePin: '', inspTab: 'design', tool: 'comment', scrollTo: '', fitPending: true, regionOnly: true, showRegions: true, regionCache: {}, histFilter: 'all', draft: null, draftFor: '', busy: false,
 };
 
 export function route() {

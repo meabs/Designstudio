@@ -1,3 +1,4 @@
+from html.parser import HTMLParser
 import base64, os, json, sqlite3, uuid, hashlib, threading, time, re, html, zipfile, io, subprocess, shlex, shutil
 from pathlib import Path
 from contextlib import contextmanager
@@ -97,6 +98,50 @@ def render_screen(title,index,screens,ctx,style,revised=False,comment=''):
  return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)}</title><style>:root{{{css}}}*{{box-sizing:border-box}}body{{margin:0;color:var(--ink,#202b24);background:var(--background,#f7f8f5);font:15px var(--font,system-ui)}}header{{padding:28px 38px;border-bottom:1px solid #dce1d8;display:flex;justify-content:space-between;font-size:12px}}.brand{{font-size:21px;font-weight:700;letter-spacing:-1px}}main{{max-width:600px;padding:40px;margin:auto}}.eyebrow{{color:var(--accent);font-size:11px;letter-spacing:2px;text-transform:uppercase}}h1{{font-size:43px;line-height:1.12;white-space:pre-line;letter-spacing:-1.8px;font-weight:500}}p{{line-height:1.7;color:var(--ink,#677065);opacity:.75}}.benefits{{padding:20px 0;line-height:2.9;font-size:13px}}button,.primary{{display:block;border:0;border-radius:var(--radius,8px);background:var(--accent,#52614c);padding:17px 24px;color:white;text-decoration:none;text-align:center;font:inherit;cursor:pointer;margin-top:16px}}.primary{{width:100%}}a{{color:var(--accent)}}label{{display:block;font-size:12px;margin:20px 0}}input{{width:100%;padding:14px;border:1px solid #d5dbd1;border-radius:6px;background:white;margin-top:8px;font:inherit}}details{{font-size:12px;margin:22px 0;color:var(--ink,#677065)}}.text{{background:none;color:var(--accent);padding:0;font-size:12px}}.summary{{background:white;padding:24px;line-height:2.5;font-size:13px}}.summary b{{float:right}}hr{{border:0;border-top:1px solid #e7e9e4}}footer{{text-align:center;font-size:10px;color:#859080;padding:24px}}.revision{{border-left:2px solid var(--accent);padding-left:12px}}{ 'main{max-width:620px;background:white;margin:28px auto;border:1px solid #e1e5df;border-radius:12px}h1{font-size:36px}.benefits{background:#f2f5ef;padding:16px;border-radius:8px}' if style=='b' else ''}</style><header><span class="brand">north<span style="color:var(--accent)">.</span></span><span>EVERYDAY CREDIT &nbsp; / &nbsp; {index+1:02d}</span></header><main><div class="eyebrow">{esc(title)} · Step {index+1} of {len(screens)}</div><h1 data-design-id="heading">{esc(heading)}</h1>{body}<details><summary>Why do we ask for this?</summary>We use this information to show suitable options. No real application is submitted.</details><a class="primary" data-role="primary-action" data-design-id="continue" href="{nextfile}">{'Continue' if index<len(screens)-1 else 'Finish demo'} &nbsp; →</a>{extra}{f'<p><a href="{previous}">← Back</a></p>' if index else ''}</main><footer>Illustrative prototype only · No application will be submitted</footer></html>'''
 
 ALLOWED_OUTPUT={'.html','.css','.js','.json','.png','.jpg','.jpeg','.svg','.woff','.woff2','.txt','.md'}
+# ---- HTML regions: locate elements by data-design-id, diff revisions per element ----
+VOID_TAGS={'area','base','br','col','embed','hr','img','input','link','meta','source','track','wbr'}
+def element_spans(html_text):
+ # {design_id: (start, end)} character offsets of each element's outerHTML.
+ starts=[0]+[m.end() for m in re.finditer('\n',html_text)]
+ off=lambda pos: starts[pos[0]-1]+pos[1]
+ class P(HTMLParser):
+  def __init__(self): super().__init__(convert_charrefs=False); self.stack=[]; self.spans={}
+  def handle_starttag(self,tag,attrs):
+   start=off(self.getpos()); did=dict(attrs).get('data-design-id')
+   if tag in VOID_TAGS:
+    if did: self.spans.setdefault(did,(start,start+len(self.get_starttag_text())))
+    return
+   self.stack.append((tag,did,start))
+  def handle_endtag(self,tag):
+   for i in range(len(self.stack)-1,-1,-1):
+    if self.stack[i][0]==tag:
+     _,did,start=self.stack[i]; end=html_text.find('>',off(self.getpos()))+1
+     if did: self.spans.setdefault(did,(start,end))
+     del self.stack[i:]; break
+ p=P(); p.feed(html_text); p.close(); return p.spans
+def _masked(text,spans,inside=None):
+ # Replace nested identified elements by placeholders so a change is attributed to the innermost element that really differs.
+ lo,hi=(inside if inside else (0,len(text))); items=sorted(((a,b,i) for i,(a,b) in spans.items() if lo<=a and b<=hi and (a,b)!=(lo,hi)))
+ out=[]; pos=lo
+ for a,b,i in items:
+  if a<pos: continue
+  out.append(text[pos:a]); out.append(f'\u27e6{i}\u27e7'); pos=b
+ out.append(text[pos:hi]); return re.sub(r'\s+',' ',''.join(out)).strip()
+def diff_regions(before,after):
+ # {'elements': ids whose own content changed, 'outside': content changed outside any identified element}
+ sb,sa=element_spans(before),element_spans(after); changed=[]
+ for i in sorted(set(sb)|set(sa)):
+  if i not in sb or i not in sa or _masked(before,sb,sb[i])!=_masked(after,sa,sa[i]): changed.append(i)
+ return {'elements':changed,'outside':_masked(before,sb)!=_masked(after,sa)}
+def region_revise(html_text,notes):
+ # Fixture behaviour: edit only the targeted elements (append a visible revision note inside each).
+ for did,comment in notes.items():
+  spans=element_spans(html_text)
+  if did not in spans: return None
+  a,b=spans[did]; seg=html_text[a:b]; close=seg.rfind('</')
+  if close<0: return None
+  html_text=html_text[:a]+seg[:close]+f' <small class="revision-note" data-revised="{html.escape(did)}">· {html.escape(comment)}</small>'+seg[close:]+html_text[b:]
+ return html_text
 MAX_PACKAGE_FILES=200; MAX_PACKAGE_BYTES=20_000_000
 EXTERNAL_PATTERNS=[(r'(?:src|href|action|poster|data)\s*=\s*["\']?\s*(?:https?:)?//','external URL in an attribute'),(r'url\(\s*["\']?\s*(?:https?:)?//','external URL in CSS url()'),(r'@import\b','CSS @import'),
  (r'\b(?:fetch|XMLHttpRequest|WebSocket|EventSource)\s*\(',"network call"),(r'sendBeacon\s*\(','network call (sendBeacon)'),(r'\bimport\s*\(|\bimport\s+[^;]*\bfrom\s+["\']',"dynamic or module import"),
@@ -222,6 +267,9 @@ def _execute(j):
   if runner['type']=='cli':
    command=[runner['executable']]+[s.replace('{input}',str(out/'envelope.json')).replace('{output}',str(out/'output')).replace('{instruction}',str(out/'TASK.md')).replace('{prompt}',j['instruction']+'\nRead envelope.json for full inputs. Write all deliverables to output/.') for s in runner.get('args',[])]
    (out/'output').mkdir(exist_ok=True)
+   if j.get('parent_id'):
+    # Revisions start from a copy of the parent version, so the agent edits in place and untouched files stay identical.
+    shutil.copytree(STORE/'variants'/j['parent_id'],out/'output',dirs_exist_ok=True,ignore=shutil.ignore_patterns('thumbnails','changes.json'))
    if run_cli(command,out,min(int(runner.get('timeout',120)),600),j,runner): raise ValueError('CLI runner failed; see runner.log in the job history')
   time.sleep(.4); check_cancel(j)
   if j['type']=='research':
@@ -241,14 +289,18 @@ def _execute(j):
    annotations=j.get('annotations',[])
    for i,title in enumerate(board['screens']):
     matching=[a for a in annotations if a['screen']==str(i)]
+    sc=(j.get('scope') or {}).get(str(i),{}); parent_html=(STORE/'variants'/parent['id']/'screens'/f'{i}.html').read_text() if parent else ''
     content=render_screen(title,i,board['screens'],ctx,variant['style'],bool(matching),' '.join(a['comment'] for a in matching))
-    if parent and not matching: content=(STORE/'variants'/parent['id']/'screens'/f'{i}.html').read_text()
+    if parent and not matching: content=parent_html
+    elif parent and sc.get('mode')=='region':
+     notes={}
+     for a in matching: notes.setdefault(a['element_id'],a['comment'])
+     content=region_revise(parent_html,notes) or content
     if runner['type']=='fixture': (folder/'screens'/f'{i}.html').write_text(content)
     manifest['screens'].append(dict(id=str(i),title=title,file=f'screens/{i}.html',states=['default','help','error'] if i==1 else ['default','help']))
     if i<len(board['screens'])-1: manifest['edges'].append({'from':str(i),'to':str(i+1),'trigger':'continue'})
     if matching: variant['changes'].append(f'{title}: '+ '; '.join(a['comment'] for a in matching))
    if runner['type']=='cli':
-    import shutil
     source=out/'output'
     for f in source.rglob('*'):
      if f.is_symlink() or not f.resolve().is_relative_to(source.resolve()): raise ValueError('Unsafe output symlink')
@@ -268,10 +320,17 @@ def _execute(j):
     variant['validation'].append(dict(check='Fixture guidance support',outcome='review',evidence='Template demo: supports tokens and explicit text/background/button color directives. Other prose rules need a local coding agent; no general rule conformance is claimed.'))
     variant['applied_tokens']=fixture_tokens(ctx)
    if parent:
+    scope=j.get('scope') or {}; variant['changed_regions']={}; variant['revision_scope']=scope
     for screen_def in manifest['screens']:
-     if not any(a['screen']==screen_def['id'] for a in annotations):
-      previous=safe_path(STORE/'variants'/parent['id'],screen_def['file']).read_bytes()
-      if safe_path(folder,screen_def['file']).read_bytes()!=previous: variant['validation'].append(dict(check='Revision scope',outcome='review',evidence='Runner modified an unrelated screen: '+screen_def['title']))
+     before=safe_path(STORE/'variants'/parent['id'],screen_def['file']).read_text(errors='replace'); after=safe_path(folder,screen_def['file']).read_text(errors='replace'); sc=scope.get(screen_def['id']); title=screen_def['title']
+     if before==after:
+      if sc: variant['validation'].append(dict(check='Revision scope · '+title,outcome='review',evidence='The agent made no change to this targeted screen.'))
+      continue
+     d=diff_regions(before,after); variant['changed_regions'][screen_def['id']]=d
+     if not sc: variant['validation'].append(dict(check='Revision scope · '+title,outcome='fail',evidence='Changed although no feedback targeted this screen.'))
+     elif sc['mode']=='region':
+      extra=[x for x in d['elements'] if x not in sc['elements']]
+      variant['validation'].append(dict(check='Revision scope · '+title,outcome='fail' if (extra or d['outside']) else 'pass',evidence=(('Changed outside the pinned element(s): '+', '.join(extra+(['page content'] if d['outside'] else []))) if (extra or d['outside']) else 'Only the pinned element(s) changed: '+', '.join(d['elements']))))
     (folder/'changes.json').write_text(json.dumps(variant['changes']))
    variant['changed_screens']=[sd['id'] for sd in manifest['screens'] if parent and (folder/sd['file']).read_bytes()!=safe_path(STORE/'variants'/parent['id'],sd['file']).read_bytes()]
    # Capture actual rendered screens using the locally installed browser.
@@ -389,7 +448,16 @@ def launch(data,kind,project_id):
  board_for_refs=get(data['board_id']) if data.get('board_id') else None
  ref_ids=data['reference_ids'] if 'reference_ids' in data else (board_for_refs or {}).get('reference_ids',[])
  references=resolve_references(project_id,[i for i in ref_ids if any(r['id']==i for r in allof('reference'))])
- common=dict(references=references,brief=data.get('brief',''),board_id=data.get('board_id'),parent_id=data.get('parent_id'),annotations=annotations,sources=data.get('sources',[]),findings=[f for r in allof('research') if r['project_id']==project_id for f in r['findings'] if f.get('selected')],context=ctx)
+ scope={}
+ if kind=='revise_board':
+  by_screen={}
+  for a in annotations:
+   e=by_screen.setdefault(str(a['screen']),{'elements':[],'anchored':True})
+   if a.get('element_id'): e['elements'].append(a['element_id'])
+   else: e['anchored']=False
+  region=data.get('scope_mode','region')=='region'
+  scope={sid:({'mode':'region','elements':sorted(set(e['elements']))} if region and e['anchored'] and e['elements'] else {'mode':'screen'}) for sid,e in by_screen.items()}
+ common=dict(scope=scope,references=references,brief=data.get('brief',''),board_id=data.get('board_id'),parent_id=data.get('parent_id'),annotations=annotations,sources=data.get('sources',[]),findings=[f for r in allof('research') if r['project_id']==project_id for f in r['findings'] if f.get('selected')],context=ctx)
  if common['board_id']:
   common['board']=get(common['board_id'])
   if common['board']['project_id']!=project_id: raise ValueError('Board must belong to this project')
@@ -401,8 +469,9 @@ def launch(data,kind,project_id):
  shared=digest(common)
  for runner_id in runners:
   j=dict(id=uid(),project_id=project_id,type=kind,runner_id=runner_id,runner_name=get(runner_id).get('name',''),status='queued',events=[],created_at=time.time(),input_hash=shared,key=key,**common)
+  scope_text=('\nRevision scope (strict): '+'; '.join((f'screen {sid}: change ONLY the element(s) with data-design-id in {sc["elements"]} and their descendants, keep every other byte of that file identical' if sc['mode']=='region' else f'screen {sid}: you may change the whole screen') for sid,sc in scope.items())+'; all other screens must be copied unchanged.') if scope else ''
   refs_text=('\nReference images (designer-supplied visual context; files in references/). Treat them as inspiration or constraints, not verified brand rules; the guidelines above take precedence unless a note says otherwise:\n'+'\n'.join(f'- references/{r["file"]} · {r["name"]}'+(f' · note: {r["note"]}' if r['note'] else '') for r in references)) if references else ''
-  j['instruction']=f'Task: {kind}. Output contract: static variant-package/1.0 or research.json.\nBrief: {common["brief"]}\nScreens: {common.get("board",{}).get("screens",[])}\nDESIGN.md:\n{ctx["markdown"]}\nTokens: {canonical(ctx["tokens"])}\nRules: {canonical(ctx["effective_rules"])}\nSnapshot SHA256: {ctx["hash"]}\nFindings (unverified unless explicitly sourced): {canonical(common["findings"])}\nSupplied sources (preserve provenance): {canonical(common["sources"])}\nAnnotations: {canonical(common["annotations"])}{refs_text}\nYou are running non-interactively: do not ask questions, do not reply with only a plan or summary, and do not wait for confirmation. The task is only complete when the files exist. Only create these file types: .html .css .js .json .png .jpg .svg .woff .woff2 (plus optional .md/.txt notes). Write files to output/. Research output: research.json with findings (id,title,detail,verification,source_ids,selected) and sources arrays. Variant output: manifest.json with schema_version=1.0, kind=clickthrough-static, board_id, start_screen_id=0 (string), screens array with id as zero-based string, title, file=screens/<id>.html, states array; edges with from,to,trigger. All requested screens must exist. Use data-role=primary-action on primary controls and data-design-id on annotation targets. For revision read the parent_package in envelope.json, copy unchanged screens exactly, revise only annotated screens. No external dependencies. Enumerate files and any guidelines you could not honor; self-report is not validation.'
+  j['instruction']=f'Task: {kind}. Output contract: static variant-package/1.0 or research.json.\nBrief: {common["brief"]}\nScreens: {common.get("board",{}).get("screens",[])}\nDESIGN.md:\n{ctx["markdown"]}\nTokens: {canonical(ctx["tokens"])}\nRules: {canonical(ctx["effective_rules"])}\nSnapshot SHA256: {ctx["hash"]}\nFindings (unverified unless explicitly sourced): {canonical(common["findings"])}\nSupplied sources (preserve provenance): {canonical(common["sources"])}\nAnnotations: {canonical(common["annotations"])}{refs_text}{scope_text}\nYou are running non-interactively: do not ask questions, do not reply with only a plan or summary, and do not wait for confirmation. The task is only complete when the files exist. Only create these file types: .html .css .js .json .png .jpg .svg .woff .woff2 (plus optional .md/.txt notes). Write files to output/. Research output: research.json with findings (id,title,detail,verification,source_ids,selected) and sources arrays. Variant output: manifest.json with schema_version=1.0, kind=clickthrough-static, board_id, start_screen_id=0 (string), screens array with id as zero-based string, title, file=screens/<id>.html, states array; edges with from,to,trigger. All requested screens must exist. Use data-role=primary-action on primary controls and data-design-id on annotation targets. For a revision, output/ ALREADY CONTAINS a full copy of the parent version: edit those files in place and leave everything not covered by the revision scope untouched. No external dependencies. Enumerate files and any guidelines you could not honor; self-report is not validation.'
   save('job',j); jobs.append(j); snapshot_references(j,STORE/'projects'/project_id/'references'); enqueue(j)
  if kind=='generate_board' and board_for_refs is not None and 'reference_ids' in data: board_for_refs['reference_ids']=[r['id'] for r in references]; save('board',board_for_refs)
  for a in annotations:
@@ -518,7 +587,6 @@ class Handler(SimpleHTTPRequestHandler):
     if d['type'] not in ['fixture','cli']: raise ValueError('Unsupported runner')
     result=save('runner',dict(id=uid(),**d))
    elif action=='test-runner':
-    import shutil
     r=get(d['id']); result={'message':'Fixture ready' if r['type']=='fixture' else ('Executable found' if shutil.which(r.get('executable','')) else 'Executable unavailable')}
    else: raise ValueError('Unknown action')
    self.send_json(result)
