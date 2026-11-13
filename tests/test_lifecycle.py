@@ -1,4 +1,4 @@
-import sys, tempfile, unittest, time, threading, json
+import sys, tempfile, unittest, time, threading, json, re
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'apps/api'))
@@ -404,5 +404,34 @@ class LifecycleTest(unittest.TestCase):
   for bad in (0,-1,24*30+1,'x'):
    with self.assertRaises(ValueError): s.share_create(proto['id'],bad)
   self.assertIsNone(s.share_create(proto['id'],None)['shares'][-1]['expires_at']); self.assertGreater(len(s.share_create(proto['id'],24)['shares'][-1]['token']),20)
+
+ # --- untrusted research output
+ SUP=[dict(id='user_source_1',title='Lore note',text='abc',verification='source_supplied_by_user')]
+ def test_research_output_is_sanitized_and_provenance_is_assigned_by_the_studio(self):
+  raw={'brief':'x','job_id':'y','id':'z','schema_version':'1.0','limitations':['No web access'],'sources':[{'id':'user_source_1','verification':'verified_source'},{'id':'a1','title':'Made up','url':'https://example.org/x','verification':'verified_source'},{'id':'a2','url':'javascript:alert(1)'}],
+   'findings':[{'id':'f1','title':'Backed by user note','detail':'d','source_ids':['user_source_1'],'verification':'verified_source','selected':True},{'id':'f2','title':'Backed by agent source','source_ids':['a1'],'verification':'verified_source'},{'id':'f3','title':'No source','source_ids':['ghost']},{'title':''},'junk',{'id':'f1','title':'Duplicate id','source_ids':[]}]}
+  out=s.sanitize_research(raw,self.SUP); by={f['title']:f for f in out['findings']}
+  self.assertEqual(set(out),{'summary','findings','sources','limitations'}); self.assertEqual(len(out['findings']),4)
+  self.assertEqual(by['Backed by user note']['verification'],'source_supplied_by_user'); self.assertEqual(by['Backed by agent source']['verification'],'unverified_claim'); self.assertEqual(by['No source']['verification'],'unverified_claim'); self.assertEqual(by['No source']['source_ids'],[])
+  self.assertTrue(all(f['selected'] is False for f in out['findings'])); self.assertTrue(all(f['verification']!='verified_source' for f in out['findings'])); self.assertEqual(len({f['id'] for f in out['findings']}),4)
+  agent=[x for x in out['sources'] if x['id']=='a1'][0]; self.assertEqual(agent['verification'],'unverified_claim'); self.assertIn('did not retrieve',agent['note']); self.assertIsNone([x for x in out['sources'] if x['id']=='a2'][0]['url']); self.assertEqual(out['sources'][0]['verification'],'source_supplied_by_user'); self.assertEqual(out['limitations'],['No web access'])
+  for bad in ({},{'findings':'x'},[]):
+   with self.assertRaises(ValueError): s.sanitize_research(bad,[])
+ def test_real_agent_research_json_with_extra_keys_no_longer_crashes_the_job(self):
+  script="mkdir -p output; printf '%s' '{\"brief\":\"x\",\"project_id\":\"p\",\"findings\":[{\"id\":\"f1\",\"title\":\"T\",\"detail\":\"D\",\"source_ids\":[\"user_source_1\"]}],\"sources\":[]}' > output/research.json"
+  r=self.cli_runner('/bin/sh',['-c',script]); j=dict(id=s.uid(),project_id=self.p['id'],type='research',runner_id=r['id'],context=s.get(self.p['context_id']),brief='the real brief',sources=self.SUP,instruction='t',events=[],status='queued',created_at=time.time()); s.save('job',j); s.execute(j)
+  self.assertEqual(s.get(j['id'])['status'],'succeeded',s.get(j['id'])['events'][-1]['message']); rec=[x for x in s.allof('research') if x['job_id']==j['id']][0]; self.assertEqual(rec['brief'],'the real brief'); self.assertEqual(rec['project_id'],self.p['id']); self.assertEqual(rec['findings'][0]['verification'],'source_supplied_by_user')
+ def test_supplied_sources_get_ids_at_launch(self):
+  with patch.object(s.threading,'Thread'): j=s.launch(dict(brief='q',sources=[{'title':'a','text':'t'},{'title':'b','text':'u'}],runner_ids=[s.allof('runner')[0]['id']]),'research',self.p['id'])[0]
+  self.assertEqual([x['id'] for x in j['sources']],['user_source_1','user_source_2']); self.assertIn('user_source_1',j['instruction']); self.assertIn('do not invent sources',j['instruction'])
+
+ def test_every_prototype_frame_lets_generated_forms_fire_submit_events_but_never_post(self):
+  # Agent-built flows use <form> + a JS submit handler; a sandbox without allow-forms never fires that event.
+  root=Path(__file__).resolve().parents[1]
+  for rel in ('apps/web/views.js','apps/web/app.js','apps/api/server.py'):
+   text=(root/rel).read_text(); frames=re.findall(r'sandbox="([^"]*)"',text)
+   for f in frames:
+    if 'allow-scripts' in f: self.assertIn('allow-forms',f,rel); self.assertNotIn('allow-same-origin',f,rel)
+  self.assertIn('allow-forms',s.SHARE_PLAYER); self.assertIn("form-action 'none'",(root/'apps/api/server.py').read_text())
 
 if __name__=='__main__': unittest.main()

@@ -311,7 +311,11 @@ def _execute(j):
   time.sleep(.4); check_cancel(j)
   if j['type']=='research':
    result={'findings':[dict(id=uid(),title=t,detail=d,selected=False,verification='unverified_claim',source_ids=[]) for t,d in [('Explain before you ask','Synthetic fixture: explain the purpose of eligibility questions before requesting information.'),('Make progress visible','Synthetic fixture: a short, predictable journey can help users understand the next step.')]],'sources':j.get('sources',[])}
-   if runner['type']=='cli': result=json.loads((out/'output'/'research.json').read_text())
+   if runner['type']=='cli':
+    rf=out/'output'/'research.json'
+    if not rf.is_file(): raise ValueError('The agent finished without writing output/research.json. Open runner.log in the job history to see what it said.')
+    try: result=sanitize_research(json.loads(rf.read_text()),j.get('sources',[]))
+    except ValueError as e: raise ValueError('Invalid research output: '+str(e))
    for finding in result['findings']:
     finding.setdefault('id',uid()); finding.setdefault('selected',False)
     if not finding.get('source_ids'): finding['verification']='unverified_claim'
@@ -582,6 +586,23 @@ def mask_state(state):
  for p in state['prototype']:
   if p.get('board_id') in hidden: p['runner_name']='Hidden (blind)'
  return state
+def sanitize_research(raw,supplied):
+ # Agent output is untrusted: keep known fields only, never accept provenance labels the agent assigned, never pre-select findings.
+ if not isinstance(raw,dict) or not isinstance(raw.get('findings'),list): raise ValueError('research.json must be an object with a findings list')
+ supplied_ids={x['id'] for x in supplied}; sources=[dict(x) for x in supplied]
+ for x in raw.get('sources') if isinstance(raw.get('sources'),list) else []:
+  if not isinstance(x,dict) or str(x.get('id') or '') in supplied_ids: continue
+  url=x.get('url') if isinstance(x.get('url'),str) and re.match(r'https?://',x['url']) else None
+  sources.append(dict(id=str(x.get('id') or uid()),title=str(x.get('title') or url or 'Source reported by the agent')[:200],url=url,text=str(x.get('text',''))[:1000] or None,verification='unverified_claim',note='Reported by the agent; the studio did not retrieve or check it'))
+ known={x['id'] for x in sources}; findings=[]; seen=set()
+ for f in raw['findings']:
+  if not isinstance(f,dict) or not str(f.get('title','')).strip(): continue
+  ids=[i for i in (f.get('source_ids') if isinstance(f.get('source_ids'),list) else []) if i in known]; fid=str(f.get('id') or uid())
+  while fid in seen: fid+='-'+uid()[:4]
+  seen.add(fid)
+  findings.append(dict(id=fid,title=str(f['title'])[:200],detail=str(f.get('detail',''))[:3000],confidence=f.get('confidence') if f.get('confidence') in ('low','medium','high') else None,source_ids=ids,selected=False,verification='source_supplied_by_user' if ids and all(i in supplied_ids for i in ids) else 'unverified_claim'))
+ lim=raw.get('limitations'); lim=[str(i)[:500] for i in lim] if isinstance(lim,list) else ([str(lim)[:1000]] if lim else [])
+ return dict(summary=str(raw.get('summary',''))[:1000],findings=findings,sources=sources,limitations=lim)
 def create_board(data):
  project_id=data['project_id']; get(project_id)
  screens=data.get('screens',[])
@@ -623,7 +644,8 @@ def launch(data,kind,project_id):
    else: e['anchored']=False
   region=data.get('scope_mode','region')=='region'
   scope={sid:({'mode':'region','elements':sorted(set(e['elements']))} if region and e['anchored'] and e['elements'] else {'mode':'screen'}) for sid,e in by_screen.items()}
- common=dict(scope=scope,references=references,brief=data.get('brief',''),board_id=data.get('board_id'),parent_id=data.get('parent_id'),annotations=annotations,sources=data.get('sources',[]),findings=[f for r in allof('research') if r['project_id']==project_id for f in r['findings'] if f.get('selected')],context=ctx)
+ supplied=[dict(x,id=x.get('id') or f'user_source_{n+1}') for n,x in enumerate(data.get('sources',[]))]
+ common=dict(scope=scope,references=references,brief=data.get('brief',''),board_id=data.get('board_id'),parent_id=data.get('parent_id'),annotations=annotations,sources=supplied,findings=[f for r in allof('research') if r['project_id']==project_id for f in r['findings'] if f.get('selected')],context=ctx)
  if common['board_id']:
   common['board']=get(common['board_id'])
   if common['board']['project_id']!=project_id: raise ValueError('Board must belong to this project')
@@ -639,7 +661,7 @@ def launch(data,kind,project_id):
   scope_text=('\nRevision scope (strict): '+'; '.join((f'screen {sid}: change ONLY the element(s) with data-design-id in {sc["elements"]} and their descendants, keep every other byte of that file identical' if sc['mode']=='region' else f'screen {sid}: you may change the whole screen') for sid,sc in scope.items())+'; all other screens must be copied unchanged.') if scope else ''
   refs_text=('\nReference images (designer-supplied visual context; files in references/). Treat them as inspiration or constraints, not verified brand rules; the guidelines above take precedence unless a note says otherwise:\n'+'\n'.join(f'- references/{r["file"]} · {r["name"]}'+(f' · note: {r["note"]}' if r['note'] else '') for r in references)) if references else ''
   if blind_labels: j['blind_label']=blind_labels[0]
-  j['instruction']=f'Task: {kind}. Output contract: static variant-package/1.0 or research.json.\nBrief: {common["brief"]}\nScreens: {common.get("board",{}).get("screens",[])}\nDESIGN.md:\n{ctx["markdown"]}\nTokens: {canonical(ctx["tokens"])}\nRules: {canonical(ctx["effective_rules"])}\nSnapshot SHA256: {ctx["hash"]}\nFindings (unverified unless explicitly sourced): {canonical(common["findings"])}\nSupplied sources (preserve provenance): {canonical(common["sources"])}\nAnnotations: {canonical(common["annotations"])}{refs_text}{scope_text}\nYou are running non-interactively: do not ask questions, do not reply with only a plan or summary, and do not wait for confirmation. The task is only complete when the files exist. Only create these file types: .html .css .js .json .png .jpg .svg .woff .woff2 (plus optional .md/.txt notes). Write files to output/. Research output: research.json with findings (id,title,detail,verification,source_ids,selected) and sources arrays. Variant output: manifest.json with schema_version=1.0, kind=clickthrough-static, board_id, start_screen_id=0 (string), screens array with id as zero-based string, title, file=screens/<id>.html, states array; edges with from,to,trigger. All requested screens must exist. Use data-role=primary-action on primary controls and data-design-id on annotation targets. For a revision, output/ ALREADY CONTAINS a full copy of the parent version: edit those files in place and leave everything not covered by the revision scope untouched. No external dependencies. Enumerate files and any guidelines you could not honor; self-report is not validation.'
+  j['instruction']=f'Task: {kind}. Output contract: static variant-package/1.0 or research.json.\nBrief: {common["brief"]}\nScreens: {common.get("board",{}).get("screens",[])}\nDESIGN.md:\n{ctx["markdown"]}\nTokens: {canonical(ctx["tokens"])}\nRules: {canonical(ctx["effective_rules"])}\nSnapshot SHA256: {ctx["hash"]}\nFindings (unverified unless explicitly sourced): {canonical(common["findings"])}\nSupplied sources (preserve provenance): {canonical(common["sources"])}\nAnnotations: {canonical(common["annotations"])}{refs_text}{scope_text}\nYou are running non-interactively: do not ask questions, do not reply with only a plan or summary, and do not wait for confirmation. The task is only complete when the files exist. Only create these file types: .html .css .js .json .png .jpg .svg .woff .woff2 (plus optional .md/.txt notes). Write files to output/. Research output: research.json with a findings array (id,title,detail,confidence,source_ids) and an optional limitations array. Cite supplied sources only by their id; do not invent sources or URLs and do not label anything verified (the studio assigns provenance labels itself). State plainly what you could not check. Variant output: manifest.json with schema_version=1.0, kind=clickthrough-static, board_id, start_screen_id=0 (string), screens array with id as zero-based string, title, file=screens/<id>.html, states array; edges with from,to,trigger. All requested screens must exist. Use data-role=primary-action on primary controls and data-design-id on annotation targets. For a revision, output/ ALREADY CONTAINS a full copy of the parent version: edit those files in place and leave everything not covered by the revision scope untouched. No external dependencies. Enumerate files and any guidelines you could not honor; self-report is not validation.'
   save('job',j); jobs.append(j); snapshot_references(j,STORE/'projects'/project_id/'references'); enqueue(j)
  if kind=='generate_board' and board_for_refs is not None and 'reference_ids' in data: board_for_refs['reference_ids']=[r['id'] for r in references]; save('board',board_for_refs)
  for a in annotations:
@@ -683,7 +705,7 @@ def share_revoke(pid,token):
 SHARE_PLAYER='''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Shared prototype</title>
 <style>*{box-sizing:border-box}body{margin:0;font:13px system-ui,sans-serif;background:#ebecf0;color:#202124;height:100vh;display:flex;flex-direction:column}header{background:#242629;color:#e6e6ec;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px}header .grow{flex:1}button{font:inherit;height:28px;padding:0 10px;border-radius:6px;border:1px solid #494a50;background:#34363c;color:#e6e6ec;cursor:pointer}button.on{background:#6366f1;border-color:#6366f1}button:focus-visible{outline:2px solid #a5a7f5;outline-offset:2px}.info{background:#fff;padding:8px 14px;font-size:12px;border-bottom:1px solid #e5e7eb;display:flex;gap:24px;flex-wrap:wrap}main{flex:1;overflow:auto;padding:20px;display:flex;justify-content:center;align-items:flex-start}.device{height:100%;min-height:520px;width:1440px;max-width:100%}.device.mobile{width:390px;border:10px solid #2b2d33;border-radius:34px;overflow:hidden;background:#2b2d33;max-height:844px}iframe{width:100%;height:100%;border:0;background:#fff;display:block}.badge{font-size:11px;background:#fff;color:#242629;border-radius:4px;padding:2px 7px}</style></head>
 <body><header><strong>Prototype</strong><span class="badge">Read-only share</span><span class="grow"></span><button data-c="back">&#8592; Back</button><button data-c="forward">Forward &#8594;</button><button data-c="restart">Restart</button><button data-s="default">Default</button><button data-s="help">Help</button><button data-s="error">Error</button><button data-d="desktop" class="on">Desktop 1440</button><button data-d="mobile">Mobile 390</button></header>
-<div class="info" id="info" role="status" aria-live="polite"></div><main><div class="device" id="device"><iframe id="f" title="Shared click-through prototype" sandbox="allow-scripts"></iframe></div></main><script src="player.js"></script></body></html>'''
+<div class="info" id="info" role="status" aria-live="polite"></div><main><div class="device" id="device"><iframe id="f" title="Shared click-through prototype" sandbox="allow-scripts allow-forms"></iframe></div></main><script src="player.js"></script></body></html>'''
 SHARE_JS=r'''(function(){var f=document.getElementById("f"),info=document.getElementById("info"),dev=document.getElementById("device"),meta;
 function show(file){var i=0;meta.screens.forEach(function(s,k){if(s.file.split("/").pop()===file)i=k});var s=meta.screens[i];info.textContent="";[s.title+" \u00b7 screen "+(i+1)+" of "+meta.screens.length,meta.board_title+" \u00b7 v"+meta.version,dev.className.indexOf("mobile")>-1?"Mobile \u00b7 390px":"Desktop \u00b7 1440px"].forEach(function(t){var e=document.createElement("span");e.textContent=t;info.appendChild(e)})}
 fetch("meta.json").then(function(r){return r.json()}).then(function(m){meta=m;var st=m.screens.filter(function(s){return s.id===m.start})[0]||m.screens[0];f.src="f/"+st.file;show(st.file.split("/").pop())});

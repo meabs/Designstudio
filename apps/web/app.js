@@ -50,7 +50,7 @@ function modal(title, body, submit, onSubmit, cls = '') {
 function confirmDialog(title, body, submit, run) { modal(title, body, submit, async () => { await run(); }); }
 function openLive(v, sid) {
   const d = $('#dialog'); d.className = 'wide';
-  d.innerHTML = `<div class="row between"><h2>Live preview · ${esc(v.runner_name)} v${v.version}</h2><button class="ghost" id="close-dialog" aria-label="Close">${icon('x')}</button></div><iframe class="live-frame" title="Live preview of generated screen" sandbox="allow-scripts" src="${live(v, sid)}"></iframe><p class="tiny muted">Sandboxed preview. Interactions are mocked; nothing is submitted.</p>`;
+  d.innerHTML = `<div class="row between"><h2>Live preview · ${esc(v.runner_name)} v${v.version}</h2><button class="ghost" id="close-dialog" aria-label="Close">${icon('x')}</button></div><iframe class="live-frame" title="Live preview of generated screen" sandbox="allow-scripts allow-forms" src="${live(v, sid)}"></iframe><p class="tiny muted">Sandboxed preview. Interactions are mocked; nothing is submitted.</p>`;
   d.showModal(); $('#close-dialog').onclick = () => d.close(); d.addEventListener('close', () => { d.innerHTML = ''; }, { once: true });
 }
 
