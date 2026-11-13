@@ -262,4 +262,44 @@ class LifecycleTest(unittest.TestCase):
  def test_reveal_without_choice(self):
   self.blind_board(); b=s.blind_choice(self.b['id']); self.assertTrue(b['revealed']); self.assertIsNone(b['blind_choice'])
 
+ # --- cross-variant mixing
+ def two(self):
+  a=self.variant(runner=0); b=self.variant(runner=1); return a,b
+ def test_mix_composes_screens_from_different_versions_and_validates(self):
+  a,b=self.two(); m=s.mix_variants(self.b['id'],{'0':a['id'],'1':b['id'],'2':a['id']})
+  self.assertEqual(m['kind'],'mix'); self.assertEqual([x['id'] for x in m['manifest']['screens']],['0','1','2']); self.assertEqual([p['variant_id'] for p in m['mix_sources']],[a['id'],b['id'],a['id']])
+  folder=s.STORE/'variants'/m['id']; self.assertEqual((folder/'screens/1.html').read_text(),(s.STORE/'variants'/b['id']/'screens/1.html').read_text()); self.assertEqual((folder/'screens/0.html').read_text(),(s.STORE/'variants'/a['id']/'screens/0.html').read_text())
+  self.assertTrue(any(c['check']=='Mixed provenance' and c['outcome']=='review' for c in m['validation'])); self.assertFalse(any(c['outcome']=='fail' and c['check']=='Package & local navigation' for c in m['validation']))
+  self.assertEqual({(e['from'],e['to']) for e in m['manifest']['edges']}>= {('0','1'),('1','2')},True)
+  self.assertEqual(s.get(m['id'])['mix_sources'],m['mix_sources']); self.assertEqual(s.get(m['job_id'])['type'],'mix_board'); self.assertIn('Mix of',m['runner_name'])
+ def test_mix_isolates_colliding_assets_and_rewrites_links(self):
+  a,b=self.two()
+  for v,color in ((a,'red'),(b,'blue')):
+   f=s.STORE/'variants'/v['id']; (f/'assets').mkdir(exist_ok=True); (f/'assets/theme.css').write_text('p{color:%s}'%color); (f/'styles.css').write_text('b{color:%s}'%color)
+   for sid in ('0','1','2'):
+    page=f/'screens'/f'{sid}.html'; page.write_text(page.read_text()+'<link rel="stylesheet" href="../assets/theme.css"><link rel="stylesheet" href="../styles.css">')
+  m=s.mix_variants(self.b['id'],{'0':a['id'],'1':b['id'],'2':b['id']}); folder=s.STORE/'variants'/m['id']
+  p0=(folder/'screens/0.html').read_text(); p1=(folder/'screens/1.html').read_text()
+  self.assertIn(f'../shared/{a["id"]}/assets/theme.css',p0); self.assertIn(f'../shared/{b["id"]}/styles.css',p1); self.assertNotIn('"../assets/theme.css"',p0)
+  self.assertEqual((folder/'shared'/a['id']/'assets/theme.css').read_text(),'p{color:red}'); self.assertEqual((folder/'shared'/b['id']/'assets/theme.css').read_text(),'p{color:blue}')
+  self.assertIn('1.html',p0)
+  s.validate(folder,m['manifest'],[])
+ def test_mix_requires_every_screen_and_two_sources_from_this_board(self):
+  a,b=self.two()
+  with self.assertRaises(ValueError): s.mix_variants(self.b['id'],{'0':a['id'],'1':b['id']})
+  with self.assertRaises(ValueError): s.mix_variants(self.b['id'],{'0':a['id'],'1':a['id'],'2':a['id']})
+  other=s.save('board',dict(id=s.uid(),project_id=self.p['id'],title='x',brief='b',screens=['A','B','C'])); 
+  with self.assertRaises(ValueError): s.mix_variants(other['id'],{'0':a['id'],'1':b['id'],'2':a['id']})
+  self.assertEqual([p for p in (s.STORE/'variants').iterdir() if p.name not in (a['id'],b['id'])],[],'failed mixes leave nothing behind')
+ def test_mix_in_blind_mode_does_not_leak_names(self):
+  vs=self.blind_board(); m=s.mix_variants(self.b['id'],{'0':vs[0]['id'],'1':vs[1]['id'],'2':vs[0]['id']})
+  import json; blob=json.dumps(self.api_state()['variant']); self.assertIn('Option',m['runner_name']); self.assertNotIn('Studio A',blob); self.assertNotIn('Studio B',blob)
+ def test_mix_can_be_approved_and_revised_with_explicit_runner(self):
+  a,b=self.two(); m=s.mix_variants(self.b['id'],{'0':a['id'],'1':b['id'],'2':a['id']}); r=s.approve(m['id']); self.assertTrue((s.STORE/'prototypes'/r['prototype']['id']/'screens/1.html').is_file())
+  pin=s.save('annotation',dict(id=s.uid(),variant_id=m['id'],screen='0',x=.5,y=.2,comment='c',element_id='heading',status='open',selected=True,created_at=time.time()))
+  with self.assertRaisesRegex(ValueError,'Choose a runner'): s.launch(dict(board_id=self.b['id'],parent_id=m['id'],annotation_ids=[pin['id']]),'revise_board',self.p['id'])
+  with patch.object(s.threading,'Thread'): job=s.launch(dict(board_id=self.b['id'],parent_id=m['id'],annotation_ids=[pin['id']],runner_ids=[a['runner_id']]),'revise_board',self.p['id'])[0]
+  with patch.object(s.subprocess,'run',return_value=None),patch.object(s.time,'sleep'): s.execute(s.get(job['id']))
+  child=s.get(s.get(job['id'])['variant_id']); self.assertEqual(child['parent_id'],m['id'])
+
 if __name__=='__main__': unittest.main()

@@ -33,7 +33,7 @@ def report(label, j, started):
     return ok
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('agent'); ap.add_argument('--model', default=''); ap.add_argument('--timeout', type=int, default=600); ap.add_argument('--guidance', action='store_true'); ap.add_argument('--region', action='store_true', help='also check a pinned-element revision changes only that element'); ap.add_argument('--references', action='store_true', help='also check the agent actually reads a reference image'); ap.add_argument('--keep', action='store_true', help='keep the temporary storage for inspection')
+    ap = argparse.ArgumentParser(); ap.add_argument('agent'); ap.add_argument('--model', default=''); ap.add_argument('--timeout', type=int, default=600); ap.add_argument('--guidance', action='store_true'); ap.add_argument('--mix', action='store_true', help='also generate a second version and check a mixed version renders identically to its sources'); ap.add_argument('--region', action='store_true', help='also check a pinned-element revision changes only that element'); ap.add_argument('--references', action='store_true', help='also check the agent actually reads a reference image'); ap.add_argument('--keep', action='store_true', help='keep the temporary storage for inspection')
     a = ap.parse_args(); s.start_workers(); tmp = tempfile.TemporaryDirectory(); s.STORE = Path(tmp.name); s.seed()
     p = s.allof('project')[0]; b = s.allof('board')[0]
     try: cfg = local_agents.configuration(a.agent, a.model)
@@ -52,6 +52,24 @@ def main():
             txt = lambda v: ''.join(f.read_text(errors='replace').lower() for f in (s.STORE / 'variants' / v['id']).rglob('*') if f.suffix in ('.html', '.css'))
             used, differs = '#c2185b' in txt(v2), txt(v1) != txt(v2)
             print(f"\n== guidance check: output differs={differs}, new accent #c2185b present={used}"); ok = ok and differs and used
+        else: ok = False
+    if ok and a.mix:
+        import subprocess
+        t = time.time(); jm = s.launch(dict(board_id=b['id'], brief=b['brief'], runner_ids=[runner['id']]), 'generate_board', p['id'])[0]
+        okm = report('second generation (for mixing)', wait(jm['id'], a.timeout), t)
+        if okm:
+            v1, v2 = s.get(s.get(j['id'])['variant_id']), s.get(s.get(jm['id'])['variant_id']); n = len(b['screens'])
+            picks = {str(i): (v1 if i % 2 == 0 else v2)['id'] for i in range(n)}; mixed = s.mix_variants(b['id'], picks)
+            bad = [c for c in mixed['validation'] if c['outcome'] == 'fail']; print('\n== mixed version:', mixed['runner_name'], '| failed checks:', bad or 'none')
+            same = []
+            for sid in (str(i) for i in range(n)):
+                src = s.STORE / 'variants' / picks[sid]; out = Path(tmp.name) / f'mixcmp-{sid}'
+                shots = []
+                for label, folder in (('src', src), ('mix', s.STORE / 'variants' / mixed['id'])):
+                    png = Path(tmp.name) / f'{label}-{sid}.png'
+                    subprocess.run(['google-chrome', '--headless', '--no-sandbox', '--disable-gpu', '--hide-scrollbars', '--window-size=720,960', f'--user-data-dir={tmp.name}/chr-{label}-{sid}', f'--screenshot={png}', (folder / 'screens' / f'{sid}.html').as_uri()], capture_output=True, timeout=60); shots.append(png.read_bytes() if png.is_file() else None)
+                same.append(shots[0] is not None and shots[0] == shots[1])
+            print(f"== mix render check: mixed screens render identically to their sources = {same}"); ok = ok and not bad and all(same)
         else: ok = False
     if ok and a.region:
         base = s.get(s.get(j['id'])['variant_id']); html0 = (s.STORE / 'variants' / base['id'] / 'screens' / '0.html').read_text(errors='replace'); ids = list(s.element_spans(html0))

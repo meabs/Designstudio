@@ -377,6 +377,65 @@ def approve(variant_id):
   if b.get('blind') and not b.get('revealed'): blind_choice(b['id'],v['id'],'Approved')
   proto=build_prototype(v)
  return dict(variant=v,prototype=proto)
+# ---- mixing: compose one new immutable version from screens of different versions ----
+LINK_RE=re.compile(r'(href|src|poster|action)\s*=\s*(["\'])([^"\']*)\2',re.I)
+def mix_variants(board_id,picks):
+ board=get(board_id); ids=[str(i) for i in range(len(board['screens']))]
+ if not isinstance(picks,dict) or set(map(str,picks))!=set(ids): raise ValueError('Choose a source version for every screen')
+ sources={}
+ for sid in ids:
+  v=sources.get(picks[sid]) or get(picks[sid])
+  if v.get('board_id')!=board_id or 'manifest' not in v: raise ValueError('Sources must be versions of this board')
+  sources[v['id']]=v
+ if len(sources)<2: raise ValueError('Pick screens from at least two different versions; to keep one version, just use it')
+ vid=uid(); folder=STORE/'variants'/vid; (folder/'screens').mkdir(parents=True); (folder/'thumbnails').mkdir()
+ try:
+  for v in sources.values():
+   src=STORE/'variants'/v['id']
+   for item in src.iterdir():
+    if item.name in ('manifest.json','changes.json','screens','thumbnails') or item.is_symlink(): continue
+    dst=folder/'shared'/v['id']/item.name; dst.parent.mkdir(parents=True,exist_ok=True)
+    shutil.copytree(item,dst,symlinks=False) if item.is_dir() else shutil.copyfile(item,dst)
+  def rewrite(text,src_id):
+   root=(STORE/'variants'/src_id).resolve()
+   def sub(m):
+    attr,q,link=m.groups()
+    if link.startswith(('#','data:','mailto:','tel:','http:','https:','//')) or not link: return m.group(0)
+    base=re.split(r'[?#]',link)[0]; tail=link[len(base):]; target=(root/'screens'/base).resolve()
+    if not target.is_relative_to(root): return m.group(0)
+    rel=target.relative_to(root)
+    if len(rel.parts)==2 and rel.parts[0]=='screens' and rel.suffix=='.html': return m.group(0)
+    return f'{attr}={q}../shared/{src_id}/{rel.as_posix()}{tail}{q}'
+   return LINK_RE.sub(sub,text)
+  entries=[]; edges=[]; changes=[]; provenance=[]
+  ctxs=[get(v['context_id']) for v in sources.values()]; ctx=max(ctxs,key=lambda c:c['created_at'])
+  blind=board.get('blind') and not board.get('revealed'); name_of=lambda v: ('Option '+str(v.get('blind_label') or '?')) if blind else v['runner_name']
+  for sid in ids:
+   v=sources[picks[sid]]; src=STORE/'variants'/v['id']; entry=next((e for e in v['manifest']['screens'] if e['id']==sid),None)
+   if not entry: raise ValueError(f'{name_of(v)} v{v["version"]} has no screen {sid}')
+   text=safe_path(src,entry['file']).read_text(errors='replace'); (folder/'screens'/f'{sid}.html').write_text(rewrite(text,v['id']))
+   entries.append(dict(id=sid,title=entry['title'],file=f'screens/{sid}.html',states=entry.get('states',['default'])))
+   for e in v['manifest'].get('edges',[]):
+    if e['from']==sid and e not in edges: edges.append(e)
+   thumb=src/'thumbnails'/f'{sid}.png'
+   if thumb.is_file(): shutil.copyfile(thumb,folder/'thumbnails'/f'{sid}.png')
+   changes.append(f"{entry['title']}: from {name_of(v)} v{v['version']}"); provenance.append(dict(screen=sid,variant_id=v['id'],name=name_of(v),version=v['version']))
+  first=sources[picks[ids[0]]]['manifest']
+  manifest=dict(schema_version='1.0',kind='clickthrough-static',board_id=board_id,start_screen_id=first.get('start_screen_id',ids[0]) if first.get('start_screen_id') in ids else ids[0],screens=entries,edges=[e for e in edges if e['from'] in ids and e['to'] in ids])
+  (folder/'manifest.json').write_text(json.dumps(manifest,indent=2))
+  validation=validate(folder,manifest,ctx['effective_rules'],ctx['tokens'])
+  names=sorted({p['name']+' v'+str(p['version']) for p in provenance})
+  validation.append(dict(check='Mixed provenance',outcome='review',evidence='Screens come from '+', '.join(names)+'. Visual and copy consistency across screens is not checked automatically.'))
+  if len({c['id'] for c in ctxs})>1: validation.append(dict(check='Mixed context versions',outcome='review',evidence='Sources were generated under different guideline versions (v'+', v'.join(str(c.get('version','?')) for c in sorted(ctxs,key=lambda c:c['created_at']))+'); the newest is recorded.'))
+  for sid in ids:
+   if not (folder/'thumbnails'/f'{sid}.png').is_file(): validation.append(dict(check='Screenshot capture · '+next(e['title'] for e in entries if e['id']==sid),outcome='not_assessable',evidence='Source had no screenshot'))
+ except Exception:
+  shutil.rmtree(folder,ignore_errors=True); raise
+ jid=uid(); count=len([v for v in allof('variant') if v['board_id']==board_id and v.get('kind')=='mix'])+1; label='Mix of '+' + '.join(dict.fromkeys(p['name'] for p in provenance))
+ variant=dict(id=vid,project_id=board['project_id'],board_id=board_id,job_id=jid,runner_id=None,runner_name=label,kind='mix',style=None,parent_id=None,context_id=ctx['id'],version=count,approved=False,review_state=None,created_at=time.time(),changes=changes,changed_screens=[],references=[],mix_sources=provenance,manifest=manifest,validation=validation)
+ save('variant',variant)
+ save('job',dict(id=jid,project_id=board['project_id'],type='mix_board',runner_id=None,runner_name='Mix',status='succeeded',events=[dict(time=time.time(),message='Mixed '+str(len(ids))+' screens from '+str(len(sources))+' versions')],created_at=time.time(),board_id=board_id,variant_id=vid,context=ctx,input_hash=digest(picks),references=[],parent_id=None,annotations=[],brief=board['brief']))
+ return variant
 def set_review_state(variant_id,state):
  v=get(variant_id)
  if not v.get('parent_id'): raise ValueError('Only revisions can be accepted or reverted')
@@ -483,6 +542,8 @@ def launch(data,kind,project_id):
  if key:
   existing=[j for j in allof('job') if j.get('key')==key and j['project_id']==project_id]
   if existing: return existing
+
+ if kind=='revise_board' and data.get('parent_id') and not data.get('runner_ids') and not get(data['parent_id']).get('runner_id'): raise ValueError('Choose a runner to revise a mixed version')
  runners=data.get('runner_ids') or ([get(data['parent_id'])['runner_id']] if kind=='revise_board' and data.get('parent_id') else [next(r['id'] for r in allof('runner') if r.get('enabled',True))]); jobs=[]
  enabled={r['id'] for r in allof('runner') if r.get('enabled',True)}
  if any(r not in enabled for r in runners): raise ValueError('Runner is disabled or no longer exists')
@@ -593,6 +654,7 @@ class Handler(SimpleHTTPRequestHandler):
    elif action=='reference-delete': result=delete_reference(d['id'])
    elif action=='board-blind': result=set_blind(d['board_id'],d.get('blind',True))
    elif action=='blind-choice': result=blind_choice(d['board_id'],d.get('variant_id'),d.get('reason',''))
+   elif action=='mix': result=mix_variants(d['board_id'],d.get('picks'))
    elif action=='approve': result=approve(d['id'])
    elif action=='accept-revision': result=set_review_state(d['id'],'accepted')
    elif action=='revert-revision': result=set_review_state(d['id'],'reverted')

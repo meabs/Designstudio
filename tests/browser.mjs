@@ -140,6 +140,16 @@ await step('approved version is locked; other versions cannot be reverted over i
   const r = await fetch(origin + '/api/revert-revision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: revisionId }) }); assert.equal(r.status, 400);
   await page.goto(`${origin}/projects/${project.id}/boards/${board.id}/review/${revisionId}`); await page.locator('.lockline').getByText('Approved and locked').waitFor();
 });
+await step('mix screens from different versions into a new immutable version', async () => {
+  await page.goto(`${origin}/projects/${project.id}/boards/${board.id}`); await page.getByRole('button', { name: /Mix screens/ }).click(); await page.locator('.mixgrid').waitFor();
+  const before = (await api('state')).variant.length; await page.locator('#modal-form').getByRole('button', { name: 'Create mixed version' }).click();
+  const m = await until(async () => (await api('state')).variant.find(v => v.kind === 'mix' && v.board_id === board.id), 'mixed version'); assert.equal((await api('state')).variant.length, before + 1);
+  assert.equal(m.manifest.screens.length, 3); assert.ok(new Set(m.mix_sources.map(x => x.variant_id)).size >= 2, 'screens from at least two versions');
+  assert.ok(!m.validation.some(c => c.outcome === 'fail' && /Package|Token/.test(c.check)), 'mix passes package checks'); assert.ok(m.validation.some(c => c.check === 'Mixed provenance'));
+  await page.locator(`[data-variant="${m.id}"]`).waitFor(); await page.locator(`[data-variant="${m.id}"] .thumbnail img`).first().waitFor();
+  await page.waitForFunction(id => [...document.querySelectorAll(`[data-variant="${id}"] .thumbnail img`)].every(i => i.complete && i.naturalWidth > 0), m.id); await page.getByText('Mixed version').first().waitFor();
+  await page.locator(`[data-variant="${m.id}"] .fname .muted`).first().waitFor();
+});
 await step('failure handling: cancel, timeout/failed card, retry, partial failure leaves other variants usable', async () => {
   const st = await api('state'); const fixtures = st.runner.filter(r => r.type === 'fixture');
   const slow = await api('runner', { type: 'cli', name: 'Slow CLI', executable: '/bin/sleep', args: ['60'], timeout: 120 }), bad = await api('runner', { type: 'cli', name: 'Failing CLI', executable: '/bin/false', args: [] });

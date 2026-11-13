@@ -14,6 +14,11 @@
 ## Reference images
 Open **References** in the left panel (or use the picker on Research and Generate) to upload images by choosing files, drag-and-drop, or pasting from the clipboard. Add a note telling the agent how to use each image. Selected images are copied into the job, listed in the task text and recorded in the envelope and input hash, so every runner in a comparison gets the same ones. Revisions reuse the board's references. Deleting a library image does not affect past jobs. The fixture runner records references but cannot interpret them; a variation with references gets a "needs designer review" item rather than a claim they were applied.
 
+## Compare more rigorously
+- **Blind compare** (Variants toolbar): hides runner names, ids and fixture hints, both in the UI and in the data the server sends. Options get random letters, inherited by their revisions. Choose **I prefer this** (with an optional reason) or **Reveal without choosing**. Approving a version also counts as your choice and reveals. The result is recorded and shown in History. Honest limit: the generated files and job folders on disk still contain runner details, and visibly different designs can give a runner away.
+- **Mix screens**: pick the source version for each screen (thumbnail grid) to create a new version. It is a normal immutable version with provenance per screen, package checks, a "Mixed provenance" review item and its own prototype. Each source's shared assets are kept apart so styles never collide. Revising a mix asks which runner should apply the feedback.
+- **Per-region revisions**: pins anchored to an element revise only that element (turn off with "Limit changes to pinned elements"). The studio compares parent and child per element and adds a pass/fail "Revision scope" check; changed regions are outlined on the review screen.
+
 ## Guidelines page
 Edit guidelines with a live preview, edit tokens as JSON (invalid JSON is flagged and blocks saving), and manage rules in the table. Rule IDs are stable; saving a changed rule raises its version. Add instructions as plain lines (stored as human-review `GUIDANCE-nnn` rules). The effective-context panel shows which scope won for any ID, before you save. Version history lists what changed; **Load into editor** restores an old version as a new one.
 

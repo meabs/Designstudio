@@ -47,16 +47,16 @@ See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for the full walkthrough. In short:
 ## Checking a real agent (contract doctor)
 
 ```sh
-python3 apps/api/doctor.py claude --guidance --references     # or: codex
+python3 apps/api/doctor.py claude --guidance --references --region --mix     # or: codex
 ```
 
-Runs the agent through the studio's own runner path on a throwaway project (temporary storage; your projects are untouched) and reports each stage: manifest and package validation, screenshots, whether changing a token changes the output (`--guidance`) and whether the agent really read a reference image (`--references`). It uses your own agent login and makes 1–3 real model calls (a few minutes). Add `--keep` to inspect the generated files.
+Runs the agent through the studio's own runner path on a throwaway project (temporary storage; your projects are untouched) and reports each stage: manifest and package validation, screenshots, whether changing a token changes the output (`--guidance`) and whether the agent really read a reference image (`--references`), whether a pinned-element revision changes only that element (`--region`) and whether mixed versions render identically to their sources (`--mix`). It uses your own agent login and makes 1–6 real model calls depending on flags (several minutes). Add `--keep` to inspect the generated files.
 
 ## Verification
 
 ```sh
 python3 -m unittest discover -s tests -v
-for f in apps/web/*.js; do node --check "$f"; done
+for f in apps/web/*.js; do node --input-type=module --check < "$f"; done
 node --test tests/research.test.mjs
 ```
 

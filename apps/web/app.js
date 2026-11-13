@@ -1,5 +1,5 @@
 import { esc, icon, badge, renderMarkdown } from './lib.js';
-import { S, route, nav, boardPath, live, protoLive, runnerOf, enabledRunners, current, checksOf, unresolvedReviews, prototypeOf, signature, variantsOf } from './store.js';
+import { S, route, nav, boardPath, live, img, protoLive, runnerOf, enabledRunners, current, checksOf, unresolvedReviews, prototypeOf, signature, variantsOf } from './store.js';
 import { page, ensureDraft, isDirty, overrideList, renderResearchResults, runnerOptions, playerInfo, tokenPanel, refPicker } from './views.js';
 import { findingsForHandoff, researchJobs, boardResearch, parseSources } from './research.js';
 
@@ -176,10 +176,17 @@ async function action(name) {
       return;
     }
     case 'review': S.tool = 'comment'; if (v) go(boardPath(b, 'review', v.id)); return;
+    case 'mix': {
+      const usable = vs.filter(x => x.review_state !== 'reverted'); if (usable.length < 2) return toast('Generate at least two versions to mix');
+      return modal('Mix screens from different versions', `<p class="muted">Pick the source of each screen. The result is a new version with its own checks; the originals are untouched.</p><div class="mixgrid" style="grid-template-columns:110px repeat(${usable.length},1fr)"><span></span>${usable.map(x => `<strong class="mixhead">${esc(x.runner_name)} v${x.version}</strong>`).join('')}${b.screens.map((t, i) => `<span class="mixrow">${esc(t)}</span>${usable.map((x, k) => `<label class="mixcell"><input type="radio" name="pick-${i}" value="${x.id}" ${k === i % usable.length ? 'checked' : ''} aria-label="${esc(t)} from ${esc(x.runner_name)} v${x.version}"><img src="${img(x, String(i))}" alt="" loading="lazy"></label>`).join('')}`).join('')}</div>`, 'Create mixed version', async f => {
+        const picks = {}; b.screens.forEach((_, i) => { picks[String(i)] = f.get('pick-' + i); }); const m = await api('mix', { board_id: b.id, picks }); await refresh(false); S.selectedVariant = m.id; go(boardPath(b)); toast('Mixed version created');
+      }, 'wide');
+    }
     case 'revise': {
       const ids = S.data.annotation.filter(a => a.variant_id === v.id && a.status !== 'applied' && a.selected !== false).map(a => a.id); if (!ids.length) return toast('Select at least one open pin');
-      await api('revise', { project_id: p.id, board_id: b.id, parent_id: v.id, brief: b.brief, runner_ids: v.runner_id ? [v.runner_id] : undefined, annotation_ids: ids, scope_mode: S.regionOnly ? 'region' : 'screen', idempotency_key: crypto.randomUUID() });
-      toast('Revision queued; the parent version is preserved'); await refresh(false); go(boardPath(b)); return;
+      const send = async runner_ids => { await api('revise', { project_id: p.id, board_id: b.id, parent_id: v.id, brief: b.brief, runner_ids, annotation_ids: ids, scope_mode: S.regionOnly ? 'region' : 'screen', idempotency_key: crypto.randomUUID() }); toast('Revision queued; the parent version is preserved'); await refresh(false); go(boardPath(b)); };
+      if (v.kind === 'mix') return modal('Choose a runner for this revision', `<p class="muted">A mixed version has no single author, so pick which runner should apply your feedback.</p>${enabledRunners().map((r, i) => `<label class="row"><input type="radio" name="runner" value="${r.id}" ${i === 0 ? 'checked' : ''} style="width:auto"> ${esc(r.name)}</label>`).join('')}`, 'Revise', f => send([f.get('runner')]));
+      await send(v.runner_id ? [v.runner_id] : undefined); return;
     }
     case 'approve': if (!v) return toast('Generate a variation first'); return approveModal();
     case 'preview': { const proto = prototypeOf(vs.find(x => x.approved)); if (!proto) return toast('Approve a board variation before previewing'); go(nav('prototypes') + '/' + proto.id); return; }
