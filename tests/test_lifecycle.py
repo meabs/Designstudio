@@ -169,4 +169,32 @@ class LifecycleTest(unittest.TestCase):
    page.write_text(base+bad)
    with self.assertRaisesRegex(ValueError,msg): s.validate(folder,v['manifest'],[])
 
+ # --- durable queue
+ def queued_job(self,runner=0,created=None,status='queued'):
+  j=dict(id=s.uid(),project_id=self.p['id'],type='generate_board',runner_id=s.allof('runner')[runner]['id'],context=s.get(self.p['context_id']),board_id=self.b['id'],parent_id=None,annotations=[],brief='b',instruction='t',events=[],status=status,created_at=created or time.time())
+  return s.save('job',j)
+ def drain(self):
+  while not s.JOBQ.empty(): s.JOBQ.get_nowait()
+ def test_restart_resumes_queued_in_order_and_fails_interrupted(self):
+  self.drain(); a=self.queued_job(created=1); b=self.queued_job(created=2); c=self.queued_job(created=3,status='running'); self.drain()   # simulate a restart: memory empty, DB intact
+  self.assertEqual(s.recover_jobs(),2); self.assertEqual([s.JOBQ.get_nowait(),s.JOBQ.get_nowait()],[a['id'],b['id']])
+  self.assertEqual(s.get(c['id'])['status'],'failed'); self.assertIn('Retry',s.get(c['id'])['events'][-1]['message']); self.assertIn('Resumed',s.get(a['id'])['events'][-1]['message'])
+  with patch.object(s.threading,'Thread'): self.assertEqual(s.retry_job(c['id'])['retry_of'],c['id'])
+ def test_cancel_queued_job_is_immediate_and_never_runs(self):
+  self.drain(); j=self.queued_job(); s.enqueue(j); s.cancel_job(j['id']); self.assertEqual(s.get(j['id'])['status'],'cancelled')
+  self.assertIsNone(s.claim(j['id'])); self.assertEqual(s.allof('variant'),[])
+ def test_claim_is_exclusive(self):
+  j=self.queued_job(); self.assertIsNotNone(s.claim(j['id'])); self.assertIsNone(s.claim(j['id'])); self.assertEqual(s.get(j['id'])['status'],'running')
+ def test_workers_execute_queued_jobs_and_respect_limit(self):
+  self.drain(); s.stop_workers()
+  try:
+   jobs=[self.queued_job(runner=i%2) for i in range(4)]
+   with patch.object(s.subprocess,'run',return_value=None): 
+    for j in jobs: s.enqueue(j)
+    s.start_workers(2); self.assertEqual(len(s.WORKERS),2)
+    end=time.time()+30
+    while time.time()<end and any(s.get(j['id'])['status'] not in ('succeeded','failed') for j in jobs): time.sleep(.1)
+   self.assertEqual([s.get(j['id'])['status'] for j in jobs],['succeeded']*4); self.assertEqual(len(s.allof('variant')),4)
+  finally: s.stop_workers(); self.drain()
+
 if __name__=='__main__': unittest.main()

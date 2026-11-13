@@ -155,7 +155,7 @@ def validate(folder,manifest,rules,tokens=None):
 
 def event(j,status,message):
  j['status']=status; j['events'].append(dict(time=time.time(),message=message)); save('job',j)
-CANCEL=set(); SLOTS=threading.BoundedSemaphore(max(1,int(os.environ.get('STUDIO_MAX_JOBS','3'))))
+CANCEL=set(); MAX_JOBS=max(1,int(os.environ.get('STUDIO_MAX_JOBS','3')))
 class Cancelled(Exception): pass
 def check_cancel(j):
  if j['id'] in CANCEL: raise Cancelled()
@@ -172,9 +172,48 @@ def run_cli(command,out,timeout,j,runner=None):
    time.sleep(.2)
  return proc.returncode
 def execute(j):
- with SLOTS:
-  try: check_cancel(j); _execute(j)
-  except Cancelled: event(j,'cancelled','Cancelled by designer; no variation was saved')
+ try: check_cancel(j); _execute(j)
+ except Cancelled: event(j,'cancelled','Cancelled by designer; no variation was saved')
+# ---- durable queue: job state lives in SQLite; this in-memory queue only holds IDs and is rebuilt from the database on start ----
+import queue
+JOBQ=queue.Queue(); WORKERS=[]
+def enqueue(j): JOBQ.put(j['id'])
+def claim(jid):
+ # Atomically move queued -> running so a cancel and a worker can never both win.
+ with LOCK:
+  j=get(jid)
+  if j['status']!='queued': return None
+  if jid in CANCEL: event(j,'cancelled','Cancelled before it started'); return None
+  j['status']='running'; save('job',j); return j
+def worker():
+ while True:
+  jid=JOBQ.get()
+  if jid is None: JOBQ.task_done(); return
+  try:
+   j=claim(jid)
+   if j: execute(j)
+  except Exception: pass
+  finally: JOBQ.task_done()
+def start_workers(n=None):
+ while len(WORKERS)<(n or MAX_JOBS):
+  t=threading.Thread(target=worker,daemon=True); t.start(); WORKERS.append(t)
+def stop_workers():
+ for _ in WORKERS: JOBQ.put(None)
+ for t in WORKERS: t.join(10)
+ WORKERS.clear()
+def recover_jobs():
+ # Queued jobs resume in their original order; jobs that were mid-run cannot be trusted, so they fail visibly and can be retried with the same inputs.
+ resumed=0
+ for j in sorted(allof('job'),key=lambda x:x['created_at']):
+  if j['status']=='running': event(j,'failed','Interrupted by a server restart; use Retry to run it again with the same inputs')
+  elif j['status']=='queued': j['events'].append(dict(time=time.time(),message='Resumed after server restart')); save('job',j); enqueue(j); resumed+=1
+ return resumed
+def cancel_job(jid):
+ with LOCK:
+  j=get(jid)
+  if j['status'] not in ['queued','running']: raise ValueError('Only queued or running jobs can be cancelled')
+  CANCEL.add(jid)
+  if j['status']=='queued': event(j,'cancelled','Cancelled before it started')
 def _execute(j):
  folder=None
  try:
@@ -364,7 +403,7 @@ def launch(data,kind,project_id):
   j=dict(id=uid(),project_id=project_id,type=kind,runner_id=runner_id,runner_name=get(runner_id).get('name',''),status='queued',events=[],created_at=time.time(),input_hash=shared,key=key,**common)
   refs_text=('\nReference images (designer-supplied visual context; files in references/). Treat them as inspiration or constraints, not verified brand rules; the guidelines above take precedence unless a note says otherwise:\n'+'\n'.join(f'- references/{r["file"]} · {r["name"]}'+(f' · note: {r["note"]}' if r['note'] else '') for r in references)) if references else ''
   j['instruction']=f'Task: {kind}. Output contract: static variant-package/1.0 or research.json.\nBrief: {common["brief"]}\nScreens: {common.get("board",{}).get("screens",[])}\nDESIGN.md:\n{ctx["markdown"]}\nTokens: {canonical(ctx["tokens"])}\nRules: {canonical(ctx["effective_rules"])}\nSnapshot SHA256: {ctx["hash"]}\nFindings (unverified unless explicitly sourced): {canonical(common["findings"])}\nSupplied sources (preserve provenance): {canonical(common["sources"])}\nAnnotations: {canonical(common["annotations"])}{refs_text}\nYou are running non-interactively: do not ask questions, do not reply with only a plan or summary, and do not wait for confirmation. The task is only complete when the files exist. Only create these file types: .html .css .js .json .png .jpg .svg .woff .woff2 (plus optional .md/.txt notes). Write files to output/. Research output: research.json with findings (id,title,detail,verification,source_ids,selected) and sources arrays. Variant output: manifest.json with schema_version=1.0, kind=clickthrough-static, board_id, start_screen_id=0 (string), screens array with id as zero-based string, title, file=screens/<id>.html, states array; edges with from,to,trigger. All requested screens must exist. Use data-role=primary-action on primary controls and data-design-id on annotation targets. For revision read the parent_package in envelope.json, copy unchanged screens exactly, revise only annotated screens. No external dependencies. Enumerate files and any guidelines you could not honor; self-report is not validation.'
-  save('job',j); jobs.append(j); snapshot_references(j,STORE/'projects'/project_id/'references'); threading.Thread(target=execute,args=(j,),daemon=True).start()
+  save('job',j); jobs.append(j); snapshot_references(j,STORE/'projects'/project_id/'references'); enqueue(j)
  if kind=='generate_board' and board_for_refs is not None and 'reference_ids' in data: board_for_refs['reference_ids']=[r['id'] for r in references]; save('board',board_for_refs)
  for a in annotations:
   if kind=='revise_board': a=get(a['id']); a.update(status='applied',job_ids=[j['id'] for j in jobs]); save('annotation',a)
@@ -375,7 +414,7 @@ def retry_job(job_id):
  if old.get('retried_by'): raise ValueError('This job was already retried')
  fresh={k:v for k,v in old.items() if k not in ['id','status','events','variant_id','key','retried_by']}
  j=dict(fresh,id=uid(),status='queued',events=[],created_at=time.time(),key=None,retry_of=old['id']); snapshot_references(j,STORE/'jobs'/old['id']/'references'); old['retried_by']=j['id']; save('job',old); save('job',j)
- threading.Thread(target=execute,args=(j,),daemon=True).start(); return j
+ enqueue(j); return j
 class Handler(SimpleHTTPRequestHandler):
  def log_message(self,*args): pass
  def send_json(self,x,status=200):
@@ -455,9 +494,7 @@ class Handler(SimpleHTTPRequestHandler):
     with LOCK,db() as c: c.execute('DELETE FROM entities WHERE id=?',(a['id'],))
     result={'deleted':a['id']}
    elif action=='cancel-job':
-    j=get(d['id'])
-    if j['status'] not in ['queued','running']: raise ValueError('Only queued or running jobs can be cancelled')
-    CANCEL.add(j['id']); result={'cancelling':j['id']}
+    cancel_job(d['id']); result={'cancelling':d['id']}
    elif action=='retry-job': result=retry_job(d['id'])
    elif action=='update-runner':
     r=get(d['id']); r.update({k:d[k] for k in ['name','enabled','timeout'] if k in d})
@@ -507,8 +544,8 @@ def main():
   return 1
  with server:
   seed()
-  for j in allof('job'):
-   if j['status'] in ['running','queued']: event(j,'failed','Server restarted during execution; retry with a new request')
+  resumed=recover_jobs(); start_workers()
+  if resumed: print(f'Resumed {resumed} queued job(s) after restart',flush=True)
   print(f'Design Studio → http://localhost:{port}',flush=True)
   try: server.serve_forever()
   except KeyboardInterrupt: pass

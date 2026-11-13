@@ -34,7 +34,7 @@ def report(label, j, started):
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('agent'); ap.add_argument('--model', default=''); ap.add_argument('--timeout', type=int, default=600); ap.add_argument('--guidance', action='store_true'); ap.add_argument('--references', action='store_true', help='also check the agent actually reads a reference image'); ap.add_argument('--keep', action='store_true', help='keep the temporary storage for inspection')
-    a = ap.parse_args(); tmp = tempfile.TemporaryDirectory(); s.STORE = Path(tmp.name); s.seed()
+    a = ap.parse_args(); s.start_workers(); tmp = tempfile.TemporaryDirectory(); s.STORE = Path(tmp.name); s.seed()
     p = s.allof('project')[0]; b = s.allof('board')[0]
     try: cfg = local_agents.configuration(a.agent, a.model)
     except ValueError as e: print('Cannot configure agent:', e); return 2
