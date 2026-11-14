@@ -37,3 +37,5 @@ The full build specification acceptance checklist has not been formally certifie
 - Style extraction lists hex colours, font stacks and px radii; it does not infer roles (accent vs background) or spacing scales.
 
 - Guideline import is heuristic: it decides what is a rule from file names, headings and wording ("must", "never", checklists), so prose-only guidance is imported as text, not rules, and a stray "must" bullet may need unticking. It reads `.md`, `.json` and `.css` only (no Figma, no Word/PDF). Re-importing is manual; the studio does not watch the folder.
+
+- Profiles are whole sets, not layers: a new profile is a copy, so later edits to Main don't flow into it. Running several profiles multiplies runs and cost by the number ticked. On a blind board the UI hides profile names, but the underlying API data still carries them.

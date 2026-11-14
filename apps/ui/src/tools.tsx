@@ -1,6 +1,6 @@
 // Designer tools: audit, rule-break log, style extraction, realistic states, decision log, review documents, responsive preview.
 import { useEffect, useState } from 'react';
-import { api, refresh, getData, ui, enabledRunners, ensureDraft, live, useData, twinOf, freeOf } from '@/lib/store';
+import { api, refresh, getData, ui, enabledRunners, ensureDraft, live, useData, twinOf, freeOf, profilesOf, activeProfileId, profileOfVariant, useUi, isDirty } from '@/lib/store';
 import { navigate, getCurrent, nav, useCurrent } from '@/lib/router';
 import { uuid, ago } from '@/lib/format';
 import { openDialog, confirmDialog, toast, Tag, Note, Field, Panel } from '@/components/app/feedback';
@@ -94,6 +94,10 @@ export function RuleBreaks({ v }: { v: any }) {
     </div>
   );
 }
+export function ProfileTag({ v, b }: { v: any; b?: any }) {
+  const data = useData(); const p = data.project.find((x: any) => x.id === v.project_id); if (profilesOf(p).length < 2 || (b?.blind && !b.revealed)) return null;
+  return <Tag data-profile-tag>{profileOfVariant(v, data).name}</Tag>;
+}
 export function proposeRule(check: string) {
   const { ctx, r } = getCurrent(); if (!ctx) return; ensureDraft(ctx); const d = ui.get().draft as any; const existing = d.rules.findIndex((x: any) => x.description === check);
   openDialog({ title: 'Propose a guideline change', submit: 'Add to guideline draft', body: <>
@@ -128,7 +132,7 @@ export function styleModal(v: any) {
     onSubmit: async (f) => {
       const tokens: Record<string, string> = {}; for (const k of [...f.keys()]) if (k.startsWith('use:')) { const i = k.slice(4); tokens[String(f.get('name:' + i)).trim()] = String(f.get('value:' + i)); }
       if (!Object.keys(tokens).length) throw Error('Tick at least one value');
-      const c = await api('apply-style', { project_id: p.id, tokens }); await refresh(); toast(`Guidelines saved as v${c.version}`);
+      const pid = profileOfVariant(v).id; const c = await api('apply-style', { project_id: p.id, tokens, ...(profilesOf(getData().project.find((x) => x.id === p.id)).some((x: any) => x.id === pid) ? { profile_id: pid } : {}) }); await refresh(); toast(`Guidelines saved as v${c.version}`);
     } });
 }
 
@@ -246,3 +250,41 @@ export function ImportPanel() {
     </Panel>
   );
 }
+
+
+/* ---------- guideline profiles ---------- */
+export function ProfileBar({ dirty }: { dirty: boolean }) {
+  const { p, ctx } = useCurrent(); const profs = profilesOf(p); const active = activeProfileId(p); const cur = ctx?.profile_id || 'main'; const prof = profs.find((x) => x.id === cur) || profs[0];
+  const switchTo = (id: string) => { if (dirty) return toast('Save or discard your changes to this profile first'); ui.set({ viewProfile: id, draftFor: '' }); };
+  const create = () => openDialog({ title: 'New guidelines profile', submit: 'Create profile', body: <>
+    <p className="mb-2 text-xs text-muted-foreground">A profile is its own set of guidelines text, rules and tokens with its own version history. Use one per idea you want to test, then pick profiles when you generate and compare the results.</p>
+    <Field label="Name" htmlFor="pf-name"><Input id="pf-name" name="name" required maxLength={40} placeholder="e.g. Looser tone, Strict compliance" /></Field>
+    <Field label="Start from" htmlFor="pf-from"><select id="pf-from" name="from" defaultValue={prof.id} className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm">{profs.map((x) => <option key={x.id} value={x.id}>{x.name} (current version)</option>)}<option value="blank">Blank defaults</option></select></Field></>,
+  onSubmit: async (f) => { const r = await api('profile-create', { project_id: p.id, name: f.get('name'), copy_from: f.get('from') }); await refresh(); const made = profilesOf(r).at(-1); ui.set({ viewProfile: made.id, draftFor: '' }); toast(`Profile “${made.name}” created. Edit it, then save a version.`); } });
+  const rename = () => openDialog({ title: `Rename “${prof.name}”`, submit: 'Rename', body: <Field label="Name" htmlFor="pf-rn"><Input id="pf-rn" name="name" required maxLength={40} defaultValue={prof.name} /></Field>, onSubmit: async (f) => { await api('profile-update', { project_id: p.id, profile_id: prof.id, name: f.get('name') }); await refresh(); } });
+  const makeDefault = async () => { try { await api('profile-update', { project_id: p.id, profile_id: prof.id, make_default: true }); await refresh(); toast(`“${prof.name}” is now the default for new runs`); } catch (e: any) { toast(e.message); } };
+  const remove = () => confirmDialog(`Delete “${prof.name}”?`, <p>The profile is removed from the list. Variants already generated with it keep their own snapshot and stay on their boards.</p>, 'Delete profile', async () => { await api('profile-delete', { project_id: p.id, profile_id: prof.id }); ui.set({ viewProfile: '', draftFor: '' }); await refresh(); });
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3" id="profile-bar">
+      <span className="text-xs font-medium text-muted-foreground">Profile</span>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Guidelines profile">{profs.map((x) => <Button key={x.id} size="sm" variant={x.id === prof.id ? 'default' : 'outline'} data-profile={x.id} aria-pressed={x.id === prof.id} onClick={() => switchTo(x.id)}>{x.name}{x.id === active ? ' · default' : ''}</Button>)}</div>
+      <Button size="sm" variant="ghost" data-action="new-profile" onClick={create}><Ic name="plus" size={13} /> New profile</Button>
+      <span className="ml-auto flex flex-wrap gap-1.5"><Button size="xs" variant="outline" onClick={rename}>Rename</Button>{prof.id !== active && <><Button size="xs" variant="outline" data-action="profile-default" onClick={makeDefault}>Make default</Button><Button size="xs" variant="outline" data-action="profile-delete" onClick={remove}>Delete</Button></>}</span>
+      {profs.length > 1 && <p className="basis-full text-xs text-muted-foreground">Editing <strong>{prof.name}</strong>. New runs use <strong>{profs.find((x) => x.id === active)?.name}</strong> unless you choose profiles in Generate.</p>}
+    </div>
+  );
+}
+
+/* ---------- profile choice inside the generate dialog ---------- */
+export function GenProfiles({ projectId, initial }: { projectId: string; initial?: string }) {
+  const data = useData(); const p = data.project.find((x: any) => x.id === projectId); const profs = profilesOf(p); const active = activeProfileId(p); const start = profs.some((x: any) => x.id === initial) ? initial! : active; const [sel, setSel] = useState<string[]>([start]);
+  const set = (next: string[]) => { setSel(next); ui.set({ genProfile: next[0] || '' }); };
+  useEffect(() => { ui.set({ genProfile: start }); }, [start]);
+  if (profs.length < 2) return null;
+  return <div className="mb-3 rounded-md border bg-background p-2.5" id="gen-profiles">
+    <div className="mb-1 text-xs font-medium">Guidelines profiles · each ticked profile runs every agent</div>
+    {profs.map((x: any) => <label key={x.id} className="row flex items-center gap-2 text-sm font-normal"><input type="checkbox" name="profiles" value={x.id} checked={sel.includes(x.id)} className="size-4" onChange={(e) => set(e.target.checked ? [...sel, x.id] : sel.filter((i) => i !== x.id))} /> {x.name}{x.id === active ? <span className="text-xs text-muted-foreground"> · default</span> : null}</label>)}
+    {sel.length > 1 && <p className="mt-1 text-xs text-muted-foreground">{sel.length} profiles × your agents = more runs and cost. Compare the results on the board; the rules shown below are for {profs.find((x: any) => x.id === sel[0])?.name}.</p>}
+  </div>;
+}
+void useUi; void isDirty;

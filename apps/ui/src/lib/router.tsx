@@ -1,5 +1,5 @@
 import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from 'react';
-import { createStore, dataStore, ui, useData, useSel, variantsOf, defaultVariant, getData } from './store';
+import { createStore, dataStore, ui, useData, useSel, variantsOf, defaultVariant, getData, profileCtx, profilesOf } from './store';
 
 const loc = createStore({ path: location.pathname + location.search });
 window.addEventListener('popstate', () => loc.set({ path: location.pathname + location.search }));
@@ -30,12 +30,13 @@ export function computeCurrent(path: string, data = getData(), selected = ui.get
   const b = boards.find((x) => x.id === r.boardId) || (listPage ? null : boards[0]) || null;
   const vs = variantsOf(b); const pool = r.view === 'boards' && r.mode === 'review' && r.variantId ? r.variantId : selected;
   const v = vs.find((x) => x.id === pool) || defaultVariant(vs) || null;
-  const ctx = data.context.find((c) => c.id === p?.context_id) || null;
+  // The Guidelines page shows the profile being edited; everywhere else shows the project's default profile.
+  const ctx = (r.view === 'context' && profilesOf(p).some((x) => x.id === ui.get().viewProfile) && profileCtx(p, ui.get().viewProfile, data)) || data.context.find((c) => c.id === p?.context_id) || null;
   return { r, p, b, vs, v, ctx, boards };
 }
 export const getCurrent = () => computeCurrent(location.pathname + location.search);
 export function useCurrent() {
-  const path = useLocationPath(); const data = useData(); const selected = useSel(ui, (s) => s.selectedVariant);
+  const path = useLocationPath(); const data = useData(); const selected = useSel(ui, (s) => s.selectedVariant); useSel(ui, (s) => s.viewProfile);
   return computeCurrent(path, data, selected);
 }
 

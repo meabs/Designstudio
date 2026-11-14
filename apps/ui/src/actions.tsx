@@ -1,7 +1,7 @@
 // Dialogs and imperative actions (ported from the old app.js action()/modal code).
 import { useEffect, useRef, useState } from 'react';
-import { api, refresh, getData, ui, runnerOf, enabledRunners, img, live, jobRefUrl, checksOf, unresolvedReviews, prototypeOf, protoLive, dataStore, isDirty, ctxVersion, rescanAgents, referencesOf, ensureDraft } from '@/lib/store';
-import { navigate, getCurrent, nav, boardPath, parseRoute } from '@/lib/router';
+import { useData, useUi, profileCtx, profilesOf, api, refresh, getData, ui, runnerOf, enabledRunners, img, live, jobRefUrl, checksOf, unresolvedReviews, prototypeOf, protoLive, dataStore, isDirty, ctxVersion, rescanAgents, referencesOf, ensureDraft } from '@/lib/store';
+import { navigate, getCurrent, nav, boardPath, parseRoute, useCurrent } from '@/lib/router';
 import { uuid, fmtHash, esc } from '@/lib/format';
 import { findingsForHandoff, handoffBrief, parseSources, boardResearch, researchJobs } from '@/lib/research';
 import { elementAt } from '@/lib/dom';
@@ -11,7 +11,7 @@ import { EstimateBox } from '@/components/app/progress';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Ic } from '@/components/app/icons';
-import { LivePreview } from '@/tools';
+import { LivePreview, GenProfiles } from '@/tools';
 import { cn } from '@/lib/utils';
 
 const parseLines = (t: string) => t.split('\n').map((x) => x.trim()).filter(Boolean);
@@ -53,7 +53,7 @@ function ConflictBox({ projectId }: { projectId: string }) {
     const form = ref.current?.closest('form'); if (!form) return; let timer: number; let seq = 0;
     const run = async () => {
       const f = new FormData(form); const my = ++seq;
-      try { const w = await api('conflict-preview', { project_id: projectId, brief: f.get('brief'), overrides: collectOverrides(f), reference_ids: f.getAll('references') }); if (my === seq) setWs(w); } catch { if (my === seq) setWs([]); }
+      try { const w = await api('conflict-preview', { project_id: projectId, brief: f.get('brief'), overrides: collectOverrides(f), reference_ids: f.getAll('references'), profile_id: f.getAll('profiles')[0] }); if (my === seq) setWs(w); } catch { if (my === seq) setWs([]); }
     };
     const onInput = () => { clearTimeout(timer); timer = window.setTimeout(run, 350); };
     form.addEventListener('input', onInput); form.addEventListener('change', run); run();
@@ -78,6 +78,18 @@ function RuleMode({ rule }: { rule: any }) {
     </div>
   );
 }
+function useGenCtx() {
+  const data = useData(); const { p, ctx } = useCurrent(); const gp = useUi((x) => x.genProfile);
+  return (gp && profileCtx(data.project.find((x: any) => x.id === p.id), gp, data)) || ctx;
+}
+function GenCtx({ dirty, found }: { dirty: boolean; found: number }) {
+  const c = useGenCtx(); const here = useCurrent().ctx; const det = c.effective_rules.filter((x: any) => x.verification === 'deterministic').length; const named = profilesOf(useCurrent().p).length > 1;
+  return <>
+      <Note>{named ? <><strong>{profilesOf(useCurrent().p).find((x: any) => x.id === (c.profile_id || 'main'))?.name}</strong> · </> : null}Context <strong>v{ctxVersion(c)}</strong> · <span className="font-mono">{c.hash.slice(0, 8)}</span> · {c.effective_rules.length} effective rules ({det} deterministic, {c.effective_rules.length - det} for designer review){found ? ` · ${found} research findings included` : ''}{dirty && c.id === here?.id && <><br /><strong>Unsaved guideline edits are not included.</strong> Save a version first.</>}</Note>
+      {c.overrides.length > 0 && <details open className="mb-3"><summary className="cursor-pointer text-sm">{c.overrides.length} rule override{c.overrides.length === 1 ? '' : 's'} in force</summary><OverrideList overrides={c.overrides} /></details>}
+  </>;
+}
+function GenRules() { const c = useGenCtx(); return <div key={c.id}>{c.effective_rules.map((x: any) => <RuleMode key={x.id} rule={x} />)}</div>; }
 export function generateModal() {
   const { b, ctx, r } = getCurrent(); if (!b || !ctx) return;
   const key = uuid(); const dirty = isDirty(ctx); const found = boardResearch(b).length;
@@ -85,8 +97,8 @@ export function generateModal() {
   openDialog({ title: 'Generate independent variants', submit: 'Generate variants', wide: true,
     body: <>
       <p className="mb-3 text-muted-foreground">Every runner receives the same brief and the same immutable context snapshot, and cannot see the others’ output.</p>
-      <Note>Context <strong>v{ctxVersion(ctx)}</strong> · <span className="font-mono">{ctx.hash.slice(0, 8)}</span> · {ctx.effective_rules.length} effective rules ({det} deterministic, {ctx.effective_rules.length - det} for designer review){found ? ` · ${found} research findings included` : ''}{dirty && <><br /><strong>Unsaved guideline edits are not included.</strong> Save a version first.</>}</Note>
-      {ctx.overrides.length > 0 && <details open className="mb-3"><summary className="cursor-pointer text-sm">{ctx.overrides.length} rule override{ctx.overrides.length === 1 ? '' : 's'} in force</summary><OverrideList overrides={ctx.overrides} /></details>}
+      <GenProfiles projectId={ctx.project_id} initial={ctx.profile_id || 'main'} />
+      <GenCtx dirty={dirty} found={found} />
       <Field label="Board brief" htmlFor="g-brief"><Textarea id="g-brief" name="brief" rows={3} defaultValue={b.brief} /></Field>
       <ConflictBox projectId={ctx.project_id} />
       <details className="exp mb-3"><summary className="cursor-pointer text-sm font-medium">Experiment for this run only</summary>
@@ -98,7 +110,7 @@ export function generateModal() {
           <label className={checkRow}><input type="radio" name="free" value="open" className="size-4" /> Fully open · ignore the guidelines, tokens and rules entirely; the brief leads</label>
         </div>
         <Field label="Run-only brief (takes precedence over DESIGN.md prose)" htmlFor="g-prose"><Textarea id="g-prose" name="prose" rows={3} placeholder="e.g. Experiment: ignore the calm tone; use three equal doors and a hand-drawn voice." /></Field>
-        <div className="mb-1 text-xs font-medium">Rules for this run</div>{ctx.effective_rules.map((x: any) => <RuleMode key={x.id} rule={x} />)}
+        <div className="mb-1 text-xs font-medium">Rules for this run</div><GenRules />
         <div className="mb-1 mt-2 text-xs font-medium">Add a rule for this run</div><div className="flex gap-2"><Input name="new-id" placeholder="ID, e.g. EXP-1" /><Input name="new-text" placeholder="Rule wording" /></div>
       </details>
       <div className="mb-3 rounded-md border bg-background p-2.5" id="explore-options">
@@ -113,10 +125,10 @@ export function generateModal() {
     </>,
     onSubmit: async (f) => {
       const runners = f.getAll('runners'); if (runners.length < 2) throw Error('Select at least two runner configurations');
-      const ov = collectOverrides(f); const pair = f.get('pair') === 'on';
+      const ov = collectOverrides(f); const pair = f.get('pair') === 'on'; const profile_ids = f.getAll('profiles').map(String); if (getData().project.find((x) => x.id === ctx.project_id) && profilesOf(getData().project.find((x) => x.id === ctx.project_id)).length > 1 && !profile_ids.length) throw Error('Choose at least one guidelines profile');
       // With a pair, the free level applies to the free half only; the other half runs as configured.
-      await api('generate', { project_id: ctx.project_id, board_id: b.id, brief: f.get('brief'), runner_ids: runners, reference_ids: f.getAll('references'), overrides: pair ? { ...ov, free: '' } : ov, spread: f.get('spread') === 'on', ...(pair ? { pair_free: ov.free || 'open' } : {}), idempotency_key: key });
-      await refresh(); navigate(boardPath(r, b)); toast(pair ? 'Rules and free runs queued' : 'Independent jobs queued');
+      await api('generate', { project_id: ctx.project_id, board_id: b.id, brief: f.get('brief'), runner_ids: runners, reference_ids: f.getAll('references'), overrides: pair ? { ...ov, free: '' } : ov, spread: f.get('spread') === 'on', ...(profile_ids.length > 1 ? { profile_ids } : profile_ids.length ? { profile_id: profile_ids[0] } : {}), ...(pair ? { pair_free: ov.free || 'open' } : {}), idempotency_key: key });
+      await refresh(); navigate(boardPath(r, b)); toast(pair ? 'Rules and free runs queued' : profile_ids.length > 1 ? `Runs queued under ${profile_ids.length} profiles` : 'Independent jobs queued');
     } });
 }
 
@@ -256,7 +268,7 @@ export const jobAction = async (kind: 'cancel' | 'dismiss' | 'retry', id: string
 export async function saveDraft() {
   const { p } = getCurrent(); const d = ui.get().draft; if (!d) throw Error('Nothing to save'); let tokens: any;
   try { tokens = JSON.parse(d.tokens); } catch { throw Error('Tokens must be valid JSON'); }
-  const c = await api('context', { project_id: p.id, markdown: d.markdown, tokens, rules: d.rules.map(({ version, ...x }: any) => x) });
+  const c = await api('context', { project_id: p.id, profile_id: getCurrent().ctx?.profile_id || 'main', markdown: d.markdown, tokens, rules: d.rules.map(({ version, ...x }: any) => x) });
   ui.set({ draftFor: '' }); await refresh(); return c;
 }
 

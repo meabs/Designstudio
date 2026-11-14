@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, navigate, useCurrent, nav, boardPath } from '@/lib/router';
 import { useData, useUi, ui, variantsOf, visibleVariants, defaultVariant, roundsOf, strandedJobs, variantStatus, checksOf, unresolvedReviews, activeJob, runnerOf, img, live, api, freeOf } from '@/lib/store';
-import { twinLink } from '@/tools';
+import { twinLink, ProfileTag } from '@/tools';
 import { boardResearch } from '@/lib/research';
 import { fmtWhen, fmtHash } from '@/lib/format';
 import { elementRects, fitZoom, ZMIN, ZMAX } from '@/lib/dom';
@@ -200,7 +200,7 @@ function VariantCard({ vv, v, b }: { vv: any; v: any; b: any }) {
           );
         })}
       </div>
-      <div className="variant-foot flex flex-wrap justify-between gap-2 border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground"><span><span className={cn('mr-1 inline-block size-1.5 rounded-full', failed ? 'bg-warning' : 'bg-success')} /> {passed} passed · {failed} failed · {pending ? `${pending} need designer review` : 'designer review complete'}</span><span>Context <span className="font-mono">{fmtHash(data.context.find((c) => c.id === vv.context_id)?.hash)}</span></span></div>
+      <div className="variant-foot flex flex-wrap justify-between gap-2 border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground"><span><span className={cn('mr-1 inline-block size-1.5 rounded-full', failed ? 'bg-warning' : 'bg-success')} /> {passed} passed · {failed} failed · {pending ? `${pending} need designer review` : 'designer review complete'}</span><span className="flex items-center gap-1.5"><ProfileTag v={vv} b={b} />Context <span className="font-mono">{fmtHash(data.context.find((c) => c.id === vv.context_id)?.hash)}</span></span></div>
     </section>
   );
 }
@@ -219,7 +219,7 @@ function CompareView({ b, vs }: { b: any; vs: any[] }) {
       <div className="compare-col min-w-0">
         <label className="sr-only" htmlFor={`cmp-${side}`}>{side} variation</label>
         <select id={`cmp-${side}`} data-compare-side={side} value={x.id} onChange={(e) => setSide(side, e.target.value)} className={nativeSelect}>{vs.map((o) => <option key={o.id} value={o.id}>{o.runner_name} · v{o.version} · {variantStatus(o)[0]}</option>)}</select>
-        <div className="my-2.5 flex flex-wrap gap-1.5"><Tag kind={variantStatus(x)[1]}>{variantStatus(x)[0]}</Tag>{freeOf(x) ? <Tag kind="warn">Free · {freeOf(x) === 'open' ? 'fully open' : 'rules off'}</Tag> : null}{x.rule_breaks ? <Tag kind={x.rule_breaks.results.some((c: any) => c.outcome === 'fail') ? 'fail' : ''}>{x.rule_breaks.results.filter((c: any) => c.outcome === 'fail').length} rule breaks</Tag> : null}{changed ? <Tag kind="warn">Changed in this screen</Tag> : null}<Tag kind={fail ? 'fail' : ''}>{pass} pass · {fail} fail · {rev} review</Tag></div>
+        <div className="my-2.5 flex flex-wrap gap-1.5"><Tag kind={variantStatus(x)[1]}>{variantStatus(x)[0]}</Tag><ProfileTag v={x} b={b} />{freeOf(x) ? <Tag kind="warn">Free · {freeOf(x) === 'open' ? 'fully open' : 'rules off'}</Tag> : null}{x.rule_breaks ? <Tag kind={x.rule_breaks.results.some((c: any) => c.outcome === 'fail') ? 'fail' : ''}>{x.rule_breaks.results.filter((c: any) => c.outcome === 'fail').length} rule breaks</Tag> : null}{changed ? <Tag kind="warn">Changed in this screen</Tag> : null}<Tag kind={fail ? 'fail' : ''}>{pass} pass · {fail} fail · {rev} review</Tag></div>
         <div className="overflow-hidden rounded-lg border bg-white"><Thumb src={img(x, screen)} alt={`${b.screens[Number(screen)]} · ${x.runner_name} v${x.version}`} className="w-full" /></div>
         <div className="filmstrip my-2.5 flex gap-2 overflow-x-auto" role="group" aria-label={`Screens of ${x.runner_name}`}>{x.manifest.screens.map((s: any) => <button key={s.id} className={cn('film h-16 w-12 shrink-0 overflow-hidden rounded-md border p-0', s.id === screen && 'on ring-2 ring-foreground')} data-screen={s.id} aria-label={s.title} onClick={() => ui.set({ screen: s.id })}><img src={img(x, s.id)} alt="" loading="lazy" className="size-full object-cover object-top" /></button>)}</div>
         {x.changes.map((c: string, i: number) => <p key={i} className="my-1 text-xs">{c}</p>)}

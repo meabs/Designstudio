@@ -9,6 +9,7 @@ import re, time, html as htmllib
 from html.parser import HTMLParser
 from pathlib import Path
 import core
+from contexts import current_context
 from core import allof, digest, get, save, uid, safe_path
 
 MAX_DOCS = 60
@@ -392,7 +393,7 @@ def extract_style(variant_id):
             fonts[m] = fonts.get(m, 0) + 1
         for m in re.findall(r'border-radius\s*:\s*(\d+px)', t):
             radii[m] = radii.get(m, 0) + 1
-    ctx = get(get(v['project_id'])['context_id']) if v.get('project_id') else {'tokens': {}}
+    ctx = current_context(v['project_id'], v.get('profile_id')) if v.get('project_id') else {'tokens': {}}
     existing = {str(x).lower() for x in ctx.get('tokens', {}).values()}
     out = []
     for n, (c, k) in enumerate(sorted(colors.items(), key=lambda x: -x[1])[:8], 1):
@@ -404,11 +405,10 @@ def extract_style(variant_id):
     return out
 
 
-def apply_style(project_id, picks):
+def apply_style(project_id, picks, profile_id=None):
     from contexts import context
 
-    p = get(project_id)
-    c = get(p['context_id'])
+    c = current_context(project_id, profile_id)
     tokens = dict(c['tokens'])
     for k, val in (picks or {}).items():
         if not re.fullmatch(r'[a-z][a-z0-9-]{0,30}', str(k)):
@@ -417,7 +417,7 @@ def apply_style(project_id, picks):
             raise ValueError('Token values must be short plain values')
         tokens[k] = val
     rules = [{k: v for k, v in r.items() if k != 'version'} for r in c['rules']]
-    return context(project_id, dict(markdown=c['markdown'], tokens=tokens, rules=rules))
+    return context(project_id, dict(markdown=c['markdown'], tokens=tokens, rules=rules, profile_id=c['profile_id']))
 
 
 # ---------- agent reading of the review documents (manual, unverified opinion) ----------

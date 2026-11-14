@@ -45,7 +45,7 @@ export const ui = createStore({
   screen: '0', selectedVariant: '', device: (typeof matchMedia === 'function' && matchMedia('(max-width:767px)').matches ? 'mobile' : 'desktop') as 'desktop' | 'mobile', zoom: 100,
   showReverted: false, showBefore: false, activePin: '', inspTab: 'design' as 'design' | 'checks' | 'comments' | 'audit', tool: 'comment' as 'comment' | 'move',
   regionOnly: true, showRegions: true, histFilter: 'all', roundState: {} as Record<string, boolean>, fitPending: true, scrollTo: '',
-  draft: null as Draft | null, draftFor: '', busy: false, playerFile: '' as string,
+  draft: null as Draft | null, draftFor: '', viewProfile: '', genProfile: '', busy: false, playerFile: '' as string,
 });
 export const useUi = <R,>(sel: (s: ReturnType<typeof ui.get>) => R) => useSel(ui, sel);
 
@@ -56,7 +56,12 @@ export const variantsOf = (board: any) => getData().variant.filter((v) => v.boar
 export const visibleVariants = (board: any) => variantsOf(board).filter((v) => ui.get().showReverted || v.review_state !== 'reverted' || v.id === ui.get().selectedVariant);
 export const defaultVariant = (vs: any[]) => vs.find((v) => v.approved) || [...vs].reverse().find((v) => v.review_state !== 'reverted') || vs.at(-1);
 export const referencesOf = (pid: string) => getData().reference.filter((r) => r.project_id === pid).sort((a, b) => a.created_at - b.created_at);
-export const contextsOf = (pid: string) => getData().context.filter((c) => c.project_id === pid).sort((a, b) => a.created_at - b.created_at);
+export const contextsOf = (pid: string, profileId?: string) => getData().context.filter((c) => c.project_id === pid && (!profileId || (c.profile_id || 'main') === profileId)).sort((a, b) => a.created_at - b.created_at);
+// Guideline profiles. A project without any behaves as one implicit 'Main' profile.
+export const profilesOf = (p: any): any[] => p?.profiles?.length ? p.profiles : p ? [{ id: 'main', name: 'Main', context_id: p.context_id }] : [];
+export const activeProfileId = (p: any) => { const l = profilesOf(p); return l.some((x) => x.id === p?.profile_id) ? p.profile_id : l[0]?.id; };
+export const profileCtx = (p: any, profileId?: string, data: Data = getData()) => { const pr = profilesOf(p).find((x) => x.id === (profileId || activeProfileId(p))) || profilesOf(p)[0]; return (pr && data.context.find((c) => c.id === pr.context_id)) || null; };
+export const profileOfVariant = (v: any, data: Data = getData()) => { const c = data.context.find((x) => x.id === v?.context_id); const p = data.project.find((x) => x.id === v?.project_id); const id = v?.profile_id || c?.profile_id || 'main'; return { id, name: profilesOf(p).find((x) => x.id === id)?.name || v?.profile_name || 'Main' }; };
 export const prototypeOf = (v: any) => getData().prototype.filter((p) => p.variant_id === v?.id).sort((a, b) => b.created_at - a.created_at)[0];
 export const refUrl = (r: any) => `/assets/projects/${r.project_id}/references/${r.file}`;
 export const jobRefUrl = (jobId: string, r: any) => `/assets/jobs/${jobId}/references/${r.file}`;

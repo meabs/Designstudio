@@ -35,17 +35,36 @@ await step('guidelines: choose files in the browser (works away from this comput
   await page.goto(`${origin}${base}/context`); await page.locator('#import-files').setInputFiles([path.join(brand, 'DESIGN.md'), path.join(brand, 'tokens.json')]);
   await page.locator('#import-result').getByText('accent').first().waitFor(); assert.equal(await page.locator('#import-result').getByText('Principles').count(), 0);
 });
+await step('profiles: create from Main, edit independently, default stays Main', async () => {
+  await page.goto(`${origin}${base}/context`); await page.locator('[data-action="new-profile"]').click(); await page.locator('#pf-name').fill('Loose'); await page.locator('#modal-form button[type=submit]').click();
+  await page.locator('[data-profile][aria-pressed="true"]', { hasText: 'Loose' }).waitFor();
+  await page.locator('#guidelines').fill('# LOOSE PROFILE\n\nBe playful.'); await page.locator('#quick-rules').fill('Only the loose rule'); await page.getByRole('button', { name: 'Add instructions as rules' }).click();
+  await page.locator('[data-action="save-context"]').click(); await until(async () => (await api('state')).context.some(c => c.markdown.startsWith('# LOOSE PROFILE')), 'loose saved');
+  st = await api('state'); const proj = st.project[0]; assert.equal(proj.profiles.length, 2); const main = st.context.find(c => c.id === proj.context_id); assert.ok(!main.markdown.startsWith('# LOOSE'), 'main untouched'); assert.equal(proj.profile_id, 'main');
+  const loose = st.context.filter(c => c.profile_id === proj.profiles[1].id); assert.deepEqual(loose.map(c => c.version), [1, 2]);
+  await page.locator('[data-profile="main"]').click(); assert.doesNotMatch(await page.locator('#guidelines').inputValue(), /LOOSE/);
+  await page.locator('[data-profile]', { hasText: 'Loose' }).click(); assert.match(await page.locator('#guidelines').inputValue(), /LOOSE PROFILE/);
+});
 await step('settings: point the project at a folder of review documents', async () => {
   await page.goto(`${origin}${base}/settings/agents`); await page.locator('#review-folder').fill(docs); await page.locator('[data-action="save-review-folder"]').click();
   await page.getByText('legal.md').waitFor(); await page.getByText('3 criteria').waitFor();
 });
+await step('generate under two profiles: separate snapshots, profile tags on the board', async () => {
+  const before = (await api('state')).job.length; await page.goto(`${origin}${base}/boards/${board.id}`); await page.getByRole('button', { name: /Generate/ }).first().click();
+  await page.locator('#gen-profiles input[value]').nth(1).check(); await page.locator('input[name="runners"]').first().check(); await page.locator('input[name="runners"]').nth(1).check();
+  await page.getByRole('button', { name: 'Generate variants' }).click();
+  await until(async () => { const j = (await api('state')).job.slice(before); return j.length === 4 && j.every(x => x.status === 'succeeded'); }, 'profile jobs');
+  const j = (await api('state')).job.slice(before); const names = [...new Set(j.map(x => x.context.profile_name))].sort(); assert.deepEqual(names, ['Loose', 'Main']);
+  assert.equal(new Set(j.map(x => x.context.hash)).size, 2, 'two distinct guideline snapshots'); assert.ok(j.filter(x => x.context.profile_name === 'Loose').every(x => x.context.effective_rules.some(r => r.description === 'Only the loose rule')));
+  await page.reload(); await page.locator('[data-profile-tag]', { hasText: 'Loose' }).first().waitFor();
+});
 await step('generate with Spread and Rules-vs-free creates four jobs with matching directions', async () => {
-  await page.goto(`${origin}${base}/boards/${board.id}`); await page.getByRole('button', { name: /Generate/ }).first().click();
+  const before = (await api('state')).job.length; await page.goto(`${origin}${base}/boards/${board.id}`); await page.getByRole('button', { name: /Generate/ }).first().click();
   await page.locator('input[name="spread"]').check(); await page.locator('input[name="pair"]').check();
   await page.locator('input[name="runners"]').first().check(); await page.locator('input[name="runners"]').nth(1).check();
   await page.getByRole('button', { name: 'Generate variants' }).click();
-  await until(async () => { const s = await api('state'); const j = s.job.filter(x => x.type === 'generate_board'); return j.length === 4 && j.every(x => x.status === 'succeeded'); }, 'four jobs');
-  st = await api('state'); const jobs = st.job.filter(x => x.type === 'generate_board'); const free = jobs.filter(x => x.context.run_overrides?.free === 'open'), norm = jobs.filter(x => !x.context.run_overrides?.free);
+  await until(async () => { const s = await api('state'); const j = s.job.slice(before).filter(x => x.type === 'generate_board'); return j.length === 4 && j.every(x => x.status === 'succeeded'); }, 'four jobs');
+  st = await api('state'); const jobs = st.job.slice(before).filter(x => x.type === 'generate_board'); const free = jobs.filter(x => x.context.run_overrides?.free === 'open'), norm = jobs.filter(x => !x.context.run_overrides?.free);
   assert.equal(free.length, 2); assert.equal(norm.length, 2); assert.deepEqual(free.map(x => x.angle).sort(), norm.map(x => x.angle).sort()); assert.equal(new Set(norm.map(x => x.angle)).size, 2);
 });
 let freeVar, normVar;

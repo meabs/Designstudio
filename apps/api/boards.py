@@ -3,6 +3,7 @@
 import copy, random, time, re
 from core import allof, canonical, digest, get, save, uid
 from jobs import enqueue
+from contexts import current_context, profiles_of
 from references import resolve_references, snapshot_references
 import core
 
@@ -278,9 +279,9 @@ def question_shaped(brief):
     return bool(b) and (b.endswith('?') or bool(QUESTION_RE.match(b))) and not re.search(r'\b(design|create|build|make|draft|prototype)\b', b, re.I)
 
 
-def conflict_preview(project_id, brief, overrides=None, reference_ids=None):
+def conflict_preview(project_id, brief, overrides=None, reference_ids=None, profile_id=None):
     # Advisory only: keyword heuristics comparing the brief, run-only prose and selected reference notes with the active rules. It cannot read images.
-    ctx = job_context(get(get(project_id)['context_id']), overrides)
+    ctx = job_context(current_context(project_id, profile_id), overrides)
     refs = resolve_references(
         project_id, [i for i in (reference_ids or []) if any(r['id'] == i for r in allof('reference'))]
     )
@@ -331,7 +332,13 @@ def launch(data, kind, project_id):
     if kind == 'research' and not str(data.get('brief', '')).strip():
         raise ValueError('Enter a research question first')
     p = get(project_id)
-    ctx = get(p['context_id'])
+    # Guidelines profile: a revision keeps the profile its parent used; otherwise the requested one, else the project's default.
+    parent_ctx = get(get(data['parent_id'])['context_id']) if data.get('parent_id') else None
+    asked = data.get('profile_id') or (data.get('profile_ids') or [None])[0]
+    inherited = (parent_ctx or {}).get('profile_id', 'main') if parent_ctx else None
+    if not asked and inherited and not any(x['id'] == inherited for x in profiles_of(p)):
+        inherited = None  # the parent's profile was deleted: revise under the default profile
+    ctx = current_context(project_id, asked or inherited)
     key = data.get('idempotency_key')
     parent_job = (
         next((j for j in allof('job') if j.get('variant_id') == data.get('parent_id')), None)

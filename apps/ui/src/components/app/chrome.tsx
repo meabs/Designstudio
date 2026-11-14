@@ -65,7 +65,7 @@ const lrow = 'lrow flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 tex
 export function ProjectPanel() {
   const { r, p, b, boards, ctx, v } = useCurrent(); const data = useData(); const roundState = useUi((s) => s.roundState); const showReverted = useUi((s) => s.showReverted);
   useUi((s) => s.draftFor); const sel = v;
-  const refs = referencesOf(p?.id); const versions = contextsOf(p?.id); const dirty = isDirty(ctx);
+  const refs = referencesOf(p?.id); const versions = contextsOf(p?.id, ctx?.profile_id || 'main'); const dirty = isDirty(ctx);
   const vs = variantsOf(b).filter((x) => showReverted || x.review_state !== 'reverted' || x.id === sel?.id);
   const R = useMemo(() => (b ? roundsOf(b) : { rounds: [], of: {} as Record<string, any> }), [b, data.variant, data.job]);
   const row = (href: string, icon: IconName, label: string, extra: ReactNode = null, on = false) => <Link key={label} href={href} className={cn(lrow, on && 'on bg-accent text-foreground font-medium')}><Ic name={icon} size={14} /><span className="lname flex-1 truncate">{label}</span>{extra}</Link>;

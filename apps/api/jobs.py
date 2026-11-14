@@ -421,6 +421,8 @@ def _execute(j):
                 style=runner.get('style', 'a'),
                 parent_id=j.get('parent_id'),
                 context_id=ctx['id'],
+                profile_id=ctx.get('profile_id', 'main'),
+                profile_name=ctx.get('profile_name', 'Main'),
                 version=parent['version'] + 1 if parent else 1,
                 approved=False,
                 created_at=time.time(),
@@ -526,7 +528,9 @@ def _execute(j):
             variant['validation'] = validate(folder, manifest, ctx['effective_rules'], ctx['tokens'])
             if ctx.get('run_overrides', {}).get('free'):
                 # Free run: nothing was enforced, so record what the project's saved rules would have said (the rule-break log).
-                saved = get(get(j['project_id'])['context_id'])
+                from contexts import current_context
+
+                saved = current_context(j['project_id'], ctx.get('profile_id'))
                 variant['rule_breaks'] = dict(
                     context_id=saved['id'],
                     context_version=saved['version'],

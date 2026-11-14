@@ -5,7 +5,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler, BaseHTTPR
 from urllib.parse import urlparse
 from local_agents import discover, configuration, bwrap_ok
 from boards import blind_choice, conflict_preview, create_board, hidden_job_file, launch, mask_state, set_blind, spread_offset
-from contexts import context, project, seed
+from contexts import context, profile_create, profile_delete, profile_update, project, seed
 from core import LOCK, ROOT, SHARE_PORT, STARTED, allof, db, get, log, safe_path, save, setup_logging, uid
 from jobs import JOBQ, MAX_JOBS, job_progress, WORKERS, cancel_job, recover_jobs, retry_job, start_workers, stop_workers
 from prototypes import approve, mix_variants, set_aside, set_review_state
@@ -361,19 +361,29 @@ class Handler(SimpleHTTPRequestHandler):
                     save('board', board)
                     jobs = launch(dict(d, board_id=board['id']), 'generate_board', d['project_id'])
                 result = {'board': board, 'jobs': jobs}
-            elif action == 'generate' and d.get('pair_free'):
-                # Rules vs free: the same brief, runners, references and directions twice, once as configured and once with the rules off.
+            elif action == 'generate' and (d.get('pair_free') or len(d.get('profile_ids') or []) > 1):
+                # Same brief, runners, references and directions repeated per guidelines profile and, with a pair, once more with the rules off.
                 b = get(d['board_id'])
-                if b.get('blind'):
+                if d.get('pair_free') and b.get('blind'):
                     raise ValueError('Rules-vs-free pairs are not available while a board is blind; they would reveal which run is which')
-                level = d['pair_free'] if d['pair_free'] in ('rules', 'open') else 'open'
+                level = d['pair_free'] if d.get('pair_free') in ('rules', 'open') else 'open'
+                pids = d.get('profile_ids') or [d.get('profile_id')]
                 off = spread_offset(d['board_id'])
                 key = d.get('idempotency_key')
-                base = dict(d, spread_offset=off)
-                normal = launch(base, 'generate_board', d['project_id'])
-                free_ov = dict(d.get('overrides') or {}, free=level)
-                free = launch(dict(base, overrides=free_ov, idempotency_key=(key + ':free') if key else None), 'generate_board', d['project_id'])
-                result = normal + free
+                result = []
+                for pid in pids:
+                    kk = key if (key and len(pids) == 1) else ((key + ':' + str(pid)) if key else None)
+                    base = dict(d, spread_offset=off, profile_id=pid, idempotency_key=kk)
+                    result += launch(base, 'generate_board', d['project_id'])
+                    if d.get('pair_free'):
+                        free_ov = dict(d.get('overrides') or {}, free=level)
+                        result += launch(dict(base, overrides=free_ov, idempotency_key=(kk + ':free') if kk else None), 'generate_board', d['project_id'])
+            elif action == 'profile-create':
+                result = profile_create(d['project_id'], d.get('name'), d.get('copy_from'))
+            elif action == 'profile-update':
+                result = profile_update(d['project_id'], d['profile_id'], d.get('name'), bool(d.get('make_default')))
+            elif action == 'profile-delete':
+                result = profile_delete(d['project_id'], d['profile_id'])
             elif action == 'revise' and d.get('states'):
                 result = launch(dict(d, states=True), 'revise_board', d['project_id'])
             elif action in ['research', 'generate', 'revise']:
@@ -415,7 +425,7 @@ class Handler(SimpleHTTPRequestHandler):
                 result = set_blind(d['board_id'], d.get('blind', True))
             elif action == 'conflict-preview':
                 result = conflict_preview(
-                    d['project_id'], d.get('brief', ''), d.get('overrides'), d.get('reference_ids')
+                    d['project_id'], d.get('brief', ''), d.get('overrides'), d.get('reference_ids'), d.get('profile_id')
                 )
             elif action == 'blind-choice':
                 result = blind_choice(d['board_id'], d.get('variant_id'), d.get('reason', ''))
@@ -469,7 +479,7 @@ class Handler(SimpleHTTPRequestHandler):
             elif action == 'extract-style':
                 result = extract_style(d['variant_id'])
             elif action == 'apply-style':
-                result = apply_style(d['project_id'], d.get('tokens'))
+                result = apply_style(d['project_id'], d.get('tokens'), d.get('profile_id'))
             elif action == 'review-check':
                 v = get(d['variant_id'])
                 if d['decision'] not in ['accepted', 'needs_change', 'open']:

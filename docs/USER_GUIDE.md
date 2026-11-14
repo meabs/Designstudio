@@ -94,3 +94,13 @@ Already have a `DESIGN.md`, rules files or design tokens? On **Guidelines → Im
 Tick what you want and press *Load into my draft*. Nothing is saved until you review the draft and press *Save new version*, so you can edit first. Items already in your draft come in unticked. The folder is remembered, so *Re-scan* picks up edits to the files. Reading a folder is only allowed from the computer running the studio.
 
 This is separate from **Review documents** (Settings), which feeds the audit rather than the guidelines.
+
+
+## Guidelines profiles (testing different rules)
+
+A **profile** is a complete, separately versioned set of guidelines: text, rules and tokens. Every project starts with one, **Main**. On **Guidelines** use the profile bar to:
+
+- **New profile:** copy Main (or any profile's current version, or blank defaults) under a new name, e.g. "Looser tone" or "Strict compliance". Edit it and save versions as usual; Main is untouched.
+- **Switch** the profile you are editing (save or discard first), **Rename**, **Make default**, or **Delete** a non-default profile.
+
+The **default** profile is what new runs, research, the conflict preview and the sidebar counts use. In **Generate**, tick one or more profiles; each ticked profile runs every agent with the same brief, references and (if Spread is on) directions, so the results are comparable. It can be combined with *Rules vs free*. Variants, the inspector, Compare and History show which profile each came from. A revision keeps its parent's profile (falling back to the default if that profile was deleted), "Pull style" saves into the variant's profile, and a free run's rule-break log checks against its own profile. Deleting a profile never touches variants already made; they keep their snapshot.
