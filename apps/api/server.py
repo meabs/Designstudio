@@ -1,7 +1,7 @@
 """Design Studio entry point: `python3 apps/api/server.py`.
 
 The implementation lives in focused modules (core, contexts, fixture, regions, validation, jobs,
-prototypes, references, research, boards, sharing, web). This file only starts the server and
+prototypes, references, research, boards, sharing, audit, web). This file only starts the server and
 re-exports their public names so tests and tools can keep using `import server as s`.
 Assigning `s.STORE` redirects the data directory for every module (it lives in `core`).
 """
@@ -20,6 +20,7 @@ from references import *
 from research import *
 from boards import *
 from sharing import *
+from audit import *
 from web import *
 from regions import _masked
 import subprocess, time, threading, json

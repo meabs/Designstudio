@@ -171,7 +171,27 @@ def record_report(j):
         log.exception('could not record agent report for job %s', j.get('id'))
 
 
+TOKENS_RE = re.compile(r'tokens used\s*[:\n]\s*([\d,]+)', re.I)
+ANSI_RE = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]|[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+
+def record_usage(j, started):
+    # Wall-clock time per job, plus a token count only when the agent printed one (Codex does, Claude Code in --print mode does not).
+    try:
+        jd = get(j['id'])
+        tokens = None
+        logp = core.STORE / 'jobs' / j['id'] / 'runner.log'
+        if logp.is_file():
+            hits = TOKENS_RE.findall(logp.read_text(errors='replace')[-6000:])
+            tokens = int(hits[-1].replace(',', '')) if hits else None
+        jd['usage'] = dict(duration_s=round(time.time() - started, 1), tokens=tokens)
+        save('job', jd)
+    except Exception:
+        log.exception('could not record usage for job %s', j.get('id'))
+
+
 def execute(j):
+    started = time.time()
     try:
         check_cancel(j)
         _execute(j)
@@ -179,6 +199,48 @@ def execute(j):
         event(j, 'cancelled', 'Cancelled by designer; no variation was saved')
     finally:
         record_report(j)
+        record_usage(j, started)
+
+
+def job_progress(jid):
+    """What is happening in a job right now: elapsed time, files the agent has written, a tail of its log.
+    The log tail and file names are withheld while the board is blind (they can name the runner)."""
+    j = get(jid)
+    now = time.time()
+    done = j['status'] not in ('queued', 'running')
+    started = next((e['time'] for e in j['events'] if e['message'].startswith('Runner started')), None)
+    end = j['events'][-1]['time'] if done and j['events'] else now
+    base = core.STORE / 'jobs' / jid
+    out = base / 'output'
+    files = []
+    if out.is_dir():
+        for f in sorted(out.rglob('*')):
+            if f.is_file() and not f.is_symlink():
+                files.append(dict(name=str(f.relative_to(out)), size=f.stat().st_size, mtime=f.stat().st_mtime))
+    board = get(j['board_id']) if j.get('board_id') else None
+    blind = bool(board and board.get('blind') and not board.get('revealed'))
+    logp = base / 'runner.log'
+    tail = ''
+    if logp.is_file() and not blind:
+        raw = logp.read_bytes()[-1600:].decode(errors='replace')
+        tail = ANSI_RE.sub('', raw).strip()
+    last = max([f['mtime'] for f in files] + ([logp.stat().st_mtime] if logp.is_file() else []) + [started or 0])
+    position = None
+    if j['status'] == 'queued':
+        position = 1 + sum(1 for x in allof('job') if x['status'] == 'queued' and x['created_at'] < j['created_at'])
+    return dict(
+        status=j['status'],
+        elapsed_s=round(end - started, 1) if started else 0,
+        idle_s=round(now - last, 1) if started and not done else 0,
+        queue_position=position,
+        screens_written=sum(1 for f in files if re.fullmatch(r'screens/\d+\.html', f['name'])),
+        screens_expected=len(board['screens']) if board and j['type'] in ('generate_board', 'revise_board') else None,
+        files=[] if blind else [dict(name=f['name'], size=f['size']) for f in files[:40]],
+        file_count=len(files),
+        log_tail=tail,
+        log_hidden=blind,
+        timeout_s=(get(j['runner_id']).get('timeout') if j.get('runner_id') else None),
+    )
 
 
 JOBQ = queue.Queue()
@@ -342,6 +404,10 @@ def _execute(j):
                     **result,
                 ),
             )
+        elif j['type'] == 'audit_review':
+            from audit import finish_doc_review
+
+            finish_doc_review(j, out, runner['type'])
         else:
             board = get(j['board_id'])
             parent = get(j['parent_id']) if j.get('parent_id') else None
@@ -430,6 +496,11 @@ def _execute(j):
                             else 'it wrote no files'
                         )
                         + '). Open runner.log in the job history to see what it said.'
+                        + (
+                            ' The log mentions a blocked or unapproved action: the agent probably could not run a command it needed. Check the runner\'s sandbox setting in Settings, then retry.'
+                            if re.search(r'blocked|not allowed|approval|permission', (out / 'runner.log').read_text(errors='replace')[-3000:], re.I)
+                            else ''
+                        )
                     )
                 try:
                     manifest_check = json.loads((source / 'manifest.json').read_text())
@@ -453,6 +524,14 @@ def _execute(j):
             if len(manifest['screens']) != len(board['screens']):
                 raise ValueError('Missing requested screens')
             variant['validation'] = validate(folder, manifest, ctx['effective_rules'], ctx['tokens'])
+            if ctx.get('run_overrides', {}).get('free'):
+                # Free run: nothing was enforced, so record what the project's saved rules would have said (the rule-break log).
+                saved = get(get(j['project_id'])['context_id'])
+                variant['rule_breaks'] = dict(
+                    context_id=saved['id'],
+                    context_version=saved['version'],
+                    results=validate(folder, manifest, saved['effective_rules'], saved['tokens']),
+                )
             if variant.get('anchors_added'):
                 variant['validation'].append(
                     dict(

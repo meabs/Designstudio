@@ -95,7 +95,7 @@ await step('review: variant route, pin with stable element anchor, edit & delete
   await page.locator('.pin').first().waitFor(); await page.getByRole('tab', { name: /Comments/ }).click(); await page.locator('.pop').waitFor();
   await page.locator('[data-pin-edit]').first().click(); await page.locator('#pe-c').fill('Move the explanatory text below the heading, please.'); await page.locator('#modal-form').getByRole('button', { name: 'Save' }).click(); await page.getByText('please.').first().waitFor();
   await page.locator('#pin-area').click({ position: { x: 20, y: 20 } }); await page.locator('#pin-comment').fill('temp'); await page.locator('#modal-form').getByRole('button', { name: 'Add comment' }).click();
-  await page.locator('[data-pin-delete]').last().click(); await page.locator('#modal-form').getByRole('button', { name: 'Delete pin' }).click(); await until(async () => (await page.locator('[data-pin-delete]').count()) === 1, 'pin deleted');
+  await page.locator('.pinrow', { hasText: 'temp' }).locator('[data-pin-delete]').click(); await page.locator('#modal-form').getByRole('button', { name: 'Delete pin' }).click(); await until(async () => (await page.locator('[data-pin-delete]').count()) === 1, 'pin deleted');
   const ann = (await api('state')).annotation.filter(a => a.variant_id === parentVariant.id); assert.equal(ann.length, 1); assert.ok(ann[0].element_id === 'heading' || ann[0].element_id === null);
 });
 await step('revise → child version pending; parent untouched; changed screens flagged; revert then re-revise and accept', async () => {

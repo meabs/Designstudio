@@ -51,3 +51,33 @@ In the player, **Share** creates a read-only link (expires after 1 hour to 30 da
 
 ## Settings → Agents
 Add local coding-agent configurations (model optional), rename, enable/disable, test or delete them. Each local agent also has the environment it may see, an **Automatic retries** limit (0 to 3) and, on Linux with bubblewrap, a **Filesystem sandbox** (on by default) that hides your home directory and other projects from the agent and lets it write only its own job folder. Fixtures always work offline. `STUDIO_MAX_JOBS` (default 3) limits concurrent jobs.
+
+## Many runs, many projects
+
+- **Rounds.** Every Generate action is a *round*: the variants created together plus every revision descending from them. Boards show variants grouped by round, newest first, with the round number and time on each card (so three runs of the same agent are no longer all "Studio B · v1"). Once a board has more than six variants, older rounds fold away to a one-line summary; click a round to open it. The Layers list in the left panel is grouped the same way and only expands the screens of the variant you are looking at.
+- **Failed attempts** appear as a compact row at the top of the board with **Retry with same inputs** and **Dismiss**. Dismiss hides the attempt from the board; it stays in Job history. A failure that has already been retried disappears by itself.
+- **Projects** opens on a home page (no project sidebar) with each project's boards, variants, approvals, running jobs and failures, sorted by last activity. With more than five projects a filter box appears. Inside a project, the small chevron next to the project name in the top bar switches projects without going back.
+- **Usage and time.** The board header shows runs, agent time and tokens when an agent reports them; running jobs show live progress (elapsed, files written, last activity, live output).
+
+
+## Designer tools
+
+**Free exploration.** In *Generate → Experiment for this run only*, choose *Loosen* (no rules or checks; the guidelines are inspiration only) or *Fully open* (no guidelines, tokens or rules; the brief leads). Nothing is saved to the project, and each variant records how it was made.
+
+**Spread.** Tick *Spread* in the generate dialog and each agent gets a different directed angle (calm, bold, dense, warm, editorial, playful). Each new spread round rotates the angles.
+
+**Rules vs free.** Tick *Rules vs free* to run every agent twice with the same brief and angle, once as configured and once with the rules off. Open either in the inspector and press *Compare rules vs free*. Not available on blind boards (it would reveal which is which).
+
+**Rule-break log.** A free variant lists what the saved guidelines would have said (fail, review, pass). Press *Propose a guideline change* on a break you like to put it in your guideline draft.
+
+**Pull style into guidelines.** *Explore from this version → Pull style* lists the colours, fonts and radii used on the screens; tick, name and save a new guideline version.
+
+**Realistic states.** *Add realistic states* asks the agent for empty, loading, error and long-content states on every screen, as a new revision.
+
+**Decision log.** Approve and *Set aside…* ask for a one-line reason. *History → Decision log* shows the trail and copies it as Markdown for a stakeholder review.
+
+**Review documents and audit.** In *Settings → Agents & models → Review documents* point the project at a folder of Markdown files. Checklist lines such as `- [ ] Must include "Representative APR"` or `- [ ] Never say "guaranteed approval"` are checked against the screen text; every other checklist line or "must/never/always" bullet becomes a review item with its file and line. Headings choose the area (accessibility, legal, content, design review). Open the **Audit** tab on a version and press *Run audit*; it never runs by itself. It always includes built-in accessibility checks (language, title, viewport, headings, alt text, labels, names, contrast, small text, tap targets, fixed widths). Mark findings *OK / accept as exception / needs change*.
+
+**Responsive preview.** The live preview has Phone / Tablet / Desktop width buttons.
+
+**Agent reading of your documents.** For checklist items that can't be matched literally, the Audit tab has *Agent reading of your documents*: pick an agent and press *Read*. It reads your Markdown and the version's screens and answers *meets / fails / could not tell* per item, with the evidence it saw. It is manual, costs one agent run, and is always labelled an unverified opinion. The template (fixture) runners can't read documents and say so.

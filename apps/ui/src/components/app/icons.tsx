@@ -1,0 +1,7 @@
+import { LayoutGrid, PanelsTopLeft, Search, FileText, History, SlidersHorizontal, Plus, Check, X, Play, Sparkles, Download, ExternalLink, Undo2, ArrowLeft, ArrowRight, RefreshCw, Smartphone, Monitor, Trash2, Pencil, MapPin, Columns2, Lock, MoreHorizontal, Link2, Square, File, Palette, ListChecks, Eye, MousePointer2, MessageSquare, Layers, Frame, ChevronRight, Minus, Maximize2, Image, Upload, ShieldCheck } from 'lucide-react';
+
+const MAP = { shield: ShieldCheck, projects: LayoutGrid, boards: PanelsTopLeft, research: Search, context: FileText, history: History, settings: SlidersHorizontal, plus: Plus, check: Check, x: X, play: Play, spark: Sparkles, download: Download, external: ExternalLink, undo: Undo2, back: ArrowLeft, forward: ArrowRight, refresh: RefreshCw, phone: Smartphone, monitor: Monitor, trash: Trash2, edit: Pencil, pin: MapPin, columns: Columns2, lock: Lock, dots: MoreHorizontal, link: Link2, stop: Square, file: File, tokens: Palette, rules: ListChecks, eye: Eye, cursor: MousePointer2, comment: MessageSquare, layers: Layers, frame: Frame, chevron: ChevronRight, minus: Minus, fit: Maximize2, image: Image, upload: Upload } as const;
+export type IconName = keyof typeof MAP;
+export function Ic({ name, size = 15, className }: { name: IconName; size?: number; className?: string }) {
+  const C = MAP[name] || File; return <C width={size} height={size} className={className} aria-hidden="true" strokeWidth={1.8} />;
+}

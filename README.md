@@ -4,10 +4,10 @@ A local, single-user design workbench with persistent guidance, research, indepe
 
 ## Run
 
-Requirements: Python 3.10+; Google Chrome on PATH as `google-chrome` for rendered screenshot previews. Coding-agent CLIs are optional and use their existing local authentication.
+Requirements: Python 3.10+ to run the studio; Node 20+ and npm **once, to build the UI** (`make run` does it for you the first time); Google Chrome on PATH as `google-chrome` for rendered screenshot previews. Coding-agent CLIs are optional and use their existing local authentication.
 
 ```sh
-make run        # or: python3 apps/api/server.py
+make run        # builds the UI on first run, then starts the server
 ```
 
 Open http://localhost:5173. Optional: `STUDIO_SHARE_PORT=5180` serves read-only prototype share links on a separate port (see the user guide). No package installation or API key is required for fixture mode. SQLite and generated artifacts are stored in `storage/`. Configure `PORT` and `STUDIO_STORAGE` through environment variables if needed.
@@ -55,9 +55,7 @@ Runs the agent through the studio's own runner path on a throwaway project (temp
 ## Verification
 
 ```sh
-python3 -m unittest discover -s tests -v
-for f in apps/web/*.js; do node --input-type=module --check < "$f"; done
-node --test tests/research.test.mjs
+make check      # builds the UI (type-checks and bundles it), then Python tests, UI unit tests and tsc
 ```
 
 Browser workflow (needs Node, Playwright and Chrome; use a disposable storage directory; fixture runners only):
@@ -81,10 +79,28 @@ See [Known limitations](KNOWN_LIMITATIONS.md), [decisions](docs/DECISIONS.md) an
 | Backup | `make backup` (SQLite online backup + job/variant/prototype/project files into `backups/<time>/`, safe while running). Restore: stop, point `STUDIO_STORAGE` at the backup folder. |
 | Tests | `make check` (syntax + Python + JS); CI runs the same on push (`.github/workflows/ci.yml`). Browser e2e and real-agent `make doctor AGENT=claude` stay manual. |
 | Access | Binds `127.0.0.1` only and rejects any `Host` that is not `localhost`/`127.0.0.1`/`[::1]` (DNS-rebinding guard; the studio can launch local agents). Add names with `STUDIO_ALLOWED_HOSTS=studio.lan`. The share listener also defaults to loopback; set `STUDIO_SHARE_HOST=0.0.0.0` (plain HTTP, no auth beyond the unguessable token) to let others reach it. |
-| Config | `PORT`, `STUDIO_STORAGE`, `STUDIO_MAX_JOBS`, `STUDIO_SHARE_PORT`, `STUDIO_SHARE_HOST`, `STUDIO_ALLOWED_HOSTS`, `STUDIO_LOG_LEVEL`. |
+| Phone / other devices | `make run-lan` (sets `STUDIO_HOST=0.0.0.0`) and open the `http://<your-ip>:5173` address it prints, on the same Wi-Fi. There is no login, so anyone on that network can use the studio and spend your agent credits; use only on a network you trust. Over LAN, other devices cannot add or change runners (that stays on the computer running the studio). Names other than this computer's own (`<hostname>.local`) are rejected; add one with `STUDIO_ALLOWED_HOSTS`. If the phone cannot connect, allow the port in your firewall (e.g. `sudo ufw allow 5173/tcp`). |
+| Config | `PORT`, `STUDIO_HOST`, `STUDIO_STORAGE`, `STUDIO_MAX_JOBS`, `STUDIO_SHARE_PORT`, `STUDIO_SHARE_HOST`, `STUDIO_ALLOWED_HOSTS`, `STUDIO_LOG_LEVEL`. |
 
 Not a multi-user deployment: there is no login, so do not expose the studio port beyond your machine.
 
 ## Code layout
 
 `apps/api/`: `server.py` (entry point, re-exports), `core.py` (storage, ids, logging), `contexts.py` (projects, versioned guidance and rules), `fixture.py` (fixture runner), `regions.py` (data-design-id diffing), `validation.py` (package checks), `jobs.py` (queue, workers, sandbox, retries, agent report), `references.py`, `research.py`, `boards.py` (boards, blind A/B, launch, overrides, conflict preview), `prototypes.py` (approval, mixing, review), `sharing.py`, `web.py` (HTTP handlers, health, `main`), plus `local_agents.py`, `doctor.py`, `backup.py`. Dependencies only point left to right in that order.
+
+## UI
+
+`apps/ui` is a React 19 + TypeScript app styled with Tailwind v4 and the [coss ui](https://coss.com/ui) components (Base UI primitives, copied into `src/components/ui` with the shadcn CLI, so they are ours to edit). Build output goes to `apps/ui/dist`, which the Python server serves (hashed files under `/ui/` are cached for a year; `index.html` always revalidates). There is no UI runtime dependency on Node: only building needs it.
+
+| Task | Command |
+|---|---|
+| Build | `make ui-build` |
+| Hot-reload development | `make run` in one terminal (API on :5173), `make ui-dev` in another (UI on :5174, proxies `/api` and `/assets`) |
+| Add a coss component | `cd apps/ui && npx shadcn@latest add @coss/<name>` |
+| UI unit tests / types | `cd apps/ui && npx vitest run && npx tsc --noEmit` |
+
+Source layout: `src/lib` (store, router, formatting, pure logic with tests), `src/components/ui` (coss), `src/components/app` (shell, dialogs, progress, reference picker), `src/views` (one file per area), `src/actions.tsx` (dialogs and named actions). Form controls that the end-to-end suite drives (`select`, checkboxes) are native elements on purpose.
+
+### Rolling back to the previous plain-JavaScript UI
+
+The old UI (no React, no build step) is preserved in `backups/ui-vanilla-before-react-<timestamp>.zip` (full working tree at the moment of the switch, including the uncommitted work before it). To go back: stop the server, unzip it over a fresh folder or restore `apps/web` and the previous `apps/api/web.py`, `Makefile` and `tests/` from it, and run `python3 apps/api/server.py`. `backups/` is git-ignored, so copy the zip somewhere safe if you want it to survive a fresh clone.

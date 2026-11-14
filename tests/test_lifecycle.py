@@ -428,7 +428,7 @@ class LifecycleTest(unittest.TestCase):
  def test_every_prototype_frame_lets_generated_forms_fire_submit_events_but_never_post(self):
   # Agent-built flows use <form> + a JS submit handler; a sandbox without allow-forms never fires that event.
   root=Path(__file__).resolve().parents[1]
-  for rel in ['apps/web/views.js','apps/web/app.js']+[str(f.relative_to(root)) for f in sorted((root/'apps/api').glob('*.py'))]:
+  for rel in [str(f.relative_to(root)) for f in sorted((root/'apps/ui/src').rglob('*.tsx')) if '/components/ui/' not in str(f)]+[str(f.relative_to(root)) for f in sorted((root/'apps/api').glob('*.py'))]:
    text=(root/rel).read_text(); frames=re.findall(r'sandbox="([^"]*)"',text)
    for f in frames:
     if 'allow-scripts' in f: self.assertIn('allow-forms',f,rel); self.assertNotIn('allow-same-origin',f,rel)

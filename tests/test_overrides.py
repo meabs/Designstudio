@@ -33,6 +33,16 @@ class OverrideTest(unittest.TestCase):
  def test_override_rule_keeps_deterministic_check(self):
   j=self.launch(overrides=dict(rules=[dict(id='CTA-001',description='Up to 3',verification='deterministic',check='primary_action_count',parameters={'max':3})]))[0]
   r=next(x for x in j['context']['effective_rules'] if x['id']=='CTA-001'); self.assertEqual(r['parameters'],{'max':3}); self.assertEqual(r['check'],'primary_action_count')
+ def test_free_exploration_drops_rules_and_optionally_guidelines(self):
+  saved=s.get(self.p['context_id'])
+  loose=self.launch(overrides=dict(free='rules'))[0]; c=loose['context']
+  self.assertEqual(c['effective_rules'],[]); self.assertEqual(c['markdown'],saved['markdown']); self.assertIn('FREE EXPLORATION',loose['instruction']); self.assertIn('inspiration only',loose['instruction'])
+  op=self.launch(overrides=dict(free='open'))[0]; c=op['context']
+  self.assertEqual(c['effective_rules'],[]); self.assertEqual(c['tokens'],{}); self.assertNotIn(saved['markdown'][:40],op['instruction']); self.assertIn('No project guidelines',op['instruction'])
+  self.assertNotEqual(loose['input_hash'],op['input_hash']); self.assertEqual(s.get(self.p['context_id'])['effective_rules'],saved['effective_rules'])
+  self.assertNotIn('FREE EXPLORATION',self.launch(overrides=dict(free='bogus'))[0]['instruction'])
+  with patch.object(s.subprocess,'run',return_value=None),patch.object(s.time,'sleep'): s.execute(op)
+  self.assertTrue(s.get(s.get(op['id'])['variant_id']))
  def test_blank_overrides_are_ignored(self):
   j=self.launch(overrides=dict(rules=[dict(id='',description='x')],prose='  '))[0]; self.assertNotIn('run_overrides',j['context'])
  def test_conflict_preview(self):
@@ -56,3 +66,9 @@ class OverrideTest(unittest.TestCase):
   j=self.launch()[0]; jd=s.get(j['id']); jd['agent_report']=dict(text='x',ignored=[],viewed_references=None); s.save('job',jd); b=s.get(self.b['id']); b['blind']=True; s.save('board',b)
   st=s.mask_state({'board':[s.get(self.b['id'])],'variant':[],'job':[s.get(j['id'])],'prototype':[]}); self.assertNotIn('agent_report',st['job'][0])
 if __name__=='__main__': unittest.main()
+
+class BriefShapeTest(unittest.TestCase):
+ def test_question_shaped_briefs_are_flagged_instructions_are_not(self):
+  import boards
+  for q in ['What will a credit card journey look like in 2030 what new features','How should onboarding work?','is this clear']: self.assertTrue(boards.question_shaped(q),q)
+  for ok in ['Design a calm 3-step credit card application','Create a transparent application. Explain eligibility first.','What to build: design a card journey','', None]: self.assertFalse(boards.question_shaped(ok),ok)

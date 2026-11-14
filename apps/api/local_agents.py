@@ -11,6 +11,8 @@ def bwrap_ok():
  try: return subprocess.run([exe,'--ro-bind','/','/','--dev','/dev','--proc','/proc','--tmpfs','/tmp','true'],capture_output=True,timeout=10).returncode==0
  except (OSError,subprocess.TimeoutExpired): return False
 
+CLAUDE_RUN_TOOLS=['Bash(python3 *)','Bash(python *)','Bash(node *)','Bash(mkdir *)','Bash(ls *)','Bash(cat *)']
+
 def discover():
  result=[]
  for name in ['codex','claude','opencode','gemini','copilot','aider']:
@@ -38,7 +40,11 @@ def configuration(agent,model,sandbox=None):
  # Codex's own sandbox cannot start inside ours (nested user namespaces are denied), so exactly one layer confines it:
  # ours when active, otherwise Codex's workspace-write mode. Never both off.
  if agent=='codex': args=['exec','--skip-git-repo-check','--sandbox','danger-full-access' if sandbox else 'workspace-write']+(['--model',model] if model else [])+['{prompt}']
- elif agent=='claude': args=['--print','--permission-mode','acceptEdits']+(['--model',model] if model else [])+['{prompt}']
+ elif agent=='claude':
+  # acceptEdits lets Claude write files but silently blocks running anything, and a non-interactive run cannot ask for approval.
+  # Agents often build screens with a small generator script, so inside our filesystem sandbox allow running interpreters
+  # (they can only write the job folder). Without the sandbox keep it edit-only.
+  args=['--print','--permission-mode','acceptEdits']+(['--allowedTools='+','.join(CLAUDE_RUN_TOOLS)] if sandbox else [])+(['--model',model] if model else [])+['{prompt}']
  else: args=['run']+(['--model',model] if model else [])+['{prompt}']
  env=['PATH','HOME','USER','LANG','LC_ALL','TERM','TMPDIR','SHELL','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']+{'codex':['CODEX_HOME','OPENAI_API_KEY'],'claude':['CLAUDE_CONFIG_DIR','ANTHROPIC_API_KEY'],'opencode':['OPENCODE_CONFIG']}.get(agent,[])
  real=os.path.dirname(os.path.realpath(installed['executable']))

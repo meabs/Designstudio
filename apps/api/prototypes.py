@@ -59,7 +59,31 @@ def build_prototype(v):
     )
 
 
-def approve(variant_id):
+DECISIONS = ('approved', 'set_aside', 'accepted', 'reverted')
+
+
+def record_decision(board_id, variant_id, decision, note=''):
+    # The decision log: why a version was chosen or set aside. Stored on the board, newest last, never edited.
+    if decision not in DECISIONS:
+        raise ValueError('Unknown decision')
+    b = get(board_id)
+    v = get(variant_id)
+    if v['board_id'] != board_id:
+        raise ValueError('Choose a version from this board')
+    b.setdefault('decisions', []).append(
+        dict(id=uid(), variant_id=variant_id, decision=decision, note=str(note or '').strip()[:500], at=time.time())
+    )
+    return save('board', b)
+
+
+def set_aside(variant_id, note=''):
+    v = get(variant_id)
+    if v.get('approved'):
+        raise ValueError('An approved version is locked; approve another version first')
+    return record_decision(v['board_id'], variant_id, 'set_aside', note)
+
+
+def approve(variant_id, note=''):
     v = get(variant_id)
     if v.get('review_state') == 'reverted':
         raise ValueError('A reverted version cannot be approved; approve its parent or another version')
@@ -80,6 +104,7 @@ def approve(variant_id):
         if b.get('blind') and not b.get('revealed'):
             blind_choice(b['id'], v['id'], 'Approved')
         proto = build_prototype(v)
+        record_decision(v['board_id'], v['id'], 'approved', note)
     return dict(variant=v, prototype=proto)
 
 
@@ -301,7 +326,7 @@ def mix_variants(board_id, picks):
     return variant
 
 
-def set_review_state(variant_id, state):
+def set_review_state(variant_id, state, note=''):
     v = get(variant_id)
     if not v.get('parent_id'):
         raise ValueError('Only revisions can be accepted or reverted')
@@ -309,4 +334,6 @@ def set_review_state(variant_id, state):
         raise ValueError('An approved version is locked; approve another version first')
     v['review_state'] = state
     v['decided_at'] = time.time()
-    return save('variant', v)
+    out = save('variant', v)
+    record_decision(v['board_id'], v['id'], state, note)
+    return out

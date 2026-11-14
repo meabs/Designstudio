@@ -66,3 +66,59 @@ class BackupTest(unittest.TestCase):
    backup.backup(a,Path(b)/'out')
    self.assertEqual(sqlite3.connect(Path(b)/'out'/'studio.db').execute("select count(*) from entities where type='project'").fetchone()[0],n)
    self.assertEqual((Path(b)/'out'/'jobs'/'j1'/'x.txt').read_text(),'hi')
+
+class LanModeTest(unittest.TestCase):
+ @classmethod
+ def setUpClass(cls):
+  cls.tmp=tempfile.TemporaryDirectory(); cls.old=s.STORE; s.STORE=Path(cls.tmp.name); s.seed()
+  cls.srv=s.ThreadingHTTPServer(('127.0.0.1',0),s.Handler); cls.port=cls.srv.server_address[1]
+  threading.Thread(target=cls.srv.serve_forever,daemon=True).start()
+ @classmethod
+ def tearDownClass(cls): cls.srv.shutdown(); cls.srv.server_close(); s.STORE=cls.old; cls.tmp.cleanup()
+ call=HardeningTest.call
+ def test_default_mode_rejects_lan_ip_hosts(self):
+  self.assertEqual(self.call('/api/state',headers={'Host':'192.168.1.20:5173'})[0],403)
+ def test_lan_mode_accepts_ip_literals_and_own_name_but_not_other_names(self):
+  with patch.dict('os.environ',{'STUDIO_HOST':'0.0.0.0'}):
+   self.assertEqual(self.call('/api/state',headers={'Host':'192.168.1.20:5173'})[0],200)
+   self.assertEqual(self.call('/api/state',headers={'Host':'[fe80::1]:5173'})[0],200)
+   self.assertEqual(self.call('/api/state',headers={'Host':'evil.example:5173'})[0],403)
+   self.assertEqual(self.call('/api/state',headers={'Host':'rebind.attacker.test'})[0],403)
+   import socket; self.assertEqual(self.call('/api/state',headers={'Host':socket.gethostname()+'.local:5173'})[0],200)
+ def test_lan_mode_blocks_runner_admin_from_other_machines_only(self):
+  with patch.dict('os.environ',{'STUDIO_HOST':'0.0.0.0'}):
+   with patch.object(web,'is_local_client',return_value=False):
+    for a in ('runner','local-runner','update-runner','delete-runner','test-runner'):
+     code,body,_=self.call('/api/'+a,{'type':'cli','executable':'/bin/sh','agent':'claude','id':'x'}); self.assertEqual(code,400); self.assertIn('computer running the studio',body['message'],a)
+    self.assertEqual(len(s.allof('runner')),2)
+    self.assertEqual(self.call('/api/project',{'name':'from phone'})[0],200)   # normal design work is allowed
+   self.assertEqual(self.call('/api/test-runner',{'id':s.allof('runner')[0]['id']})[0],200)  # local machine still can
+ def test_a_computer_using_its_own_network_address_counts_as_local(self):
+  self.assertTrue(web.is_local_client('192.168.1.152','192.168.1.152')); self.assertTrue(web.is_local_client('::ffff:192.168.1.152','192.168.1.152')); self.assertTrue(web.is_local_client('127.0.0.1','192.168.1.152'))
+  self.assertFalse(web.is_local_client('192.168.1.77','192.168.1.152'))
+ def test_loopback_detection(self):
+  self.assertTrue(web.is_loopback_client('127.0.0.1')); self.assertTrue(web.is_loopback_client('::1')); self.assertFalse(web.is_loopback_client('192.168.1.5'))
+
+class UiServingTest(unittest.TestCase):
+ @classmethod
+ def setUpClass(cls):
+  cls.dist=tempfile.TemporaryDirectory(); d=Path(cls.dist.name); (d/'ui').mkdir(); (d/'index.html').write_text('<!doctype html><div id="root"></div>'); (d/'ui'/'app-abc123.js').write_text('console.log(1)')
+  cls.patch=patch.object(web,'UI_DIST',d); cls.patch.start()
+  cls.srv=s.ThreadingHTTPServer(('127.0.0.1',0),s.Handler); cls.port=cls.srv.server_address[1]; threading.Thread(target=cls.srv.serve_forever,daemon=True).start()
+ @classmethod
+ def tearDownClass(cls): cls.srv.shutdown(); cls.srv.server_close(); cls.patch.stop(); cls.dist.cleanup()
+ def get(self,path,headers=None):
+  r=urllib.request.Request(f'http://127.0.0.1:{self.port}{path}',headers=headers or {})
+  try:
+   with urllib.request.urlopen(r) as x: return x.status,x.read().decode(),x.headers
+  except urllib.error.HTTPError as e: e.close(); return e.code,'',e.headers
+ def test_index_revalidates_and_hashed_assets_are_immutable(self):
+  code,html,h=self.get('/'); self.assertEqual(code,200); self.assertEqual(h['Cache-Control'],'no-cache'); self.assertIn('id="root"',html)
+  self.assertEqual(self.get('/',{'If-None-Match':h['ETag']})[0],304)
+  code,_,h2=self.get('/ui/app-abc123.js'); self.assertEqual(code,200); self.assertIn('immutable',h2['Cache-Control'])
+ def test_deep_links_get_the_app_and_traversal_is_refused(self):
+  code,html,_=self.get('/projects/abc/boards/def/review/ghi'); self.assertEqual(code,200); self.assertIn('id="root"',html)
+  self.assertNotEqual(self.get('/ui/../../api/server.py')[0],200)
+ def test_missing_build_gives_a_clear_503(self):
+  with patch.object(web,'UI_DIST',Path('/nonexistent-dist')): code,body,_=self.get('/')
+  self.assertEqual(code,503)

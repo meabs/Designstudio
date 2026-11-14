@@ -99,6 +99,9 @@ def mask_state(state):
             v['runner_id'] = None
             v.pop('style', None)
             v.pop('applied_tokens', None)
+            v.pop('rule_breaks', None)
+            for dr in v.get('doc_reviews', []):
+                dr['runner_name'] = 'Hidden (blind)'
             for c in v.get('validation', []):
                 if c['check'] == 'Fixture guidance support':
                     c.update(
@@ -110,6 +113,11 @@ def mask_state(state):
             j['runner_name'] = 'Hidden (blind)'
             j['runner_id'] = None
             j.pop('agent_report', None)
+            j.pop('usage', None)
+            j.pop('angle', None)
+    for b in state['board']:
+        if b['id'] in hidden:
+            b.pop('decisions', None)
     for p in state['prototype']:
         if p.get('board_id') in hidden:
             p['runner_name'] = 'Hidden (blind)'
@@ -169,10 +177,19 @@ def job_context(ctx, ov):
     ]
     suspend = [str(i) for i in ov.get('suspend', []) if str(i).strip()]
     prose = str(ov.get('prose', '')).strip()
-    if not (rules or suspend or prose):
+    free = ov.get('free') if ov.get('free') in ('rules', 'open') else ''
+    if not (rules or suspend or prose or free):
         return ctx
     c = copy.deepcopy(ctx)
     eff = {r['id']: r for r in c['effective_rules']}
+    free_log = []
+    if free:
+        # Free exploration: nothing is enforced or checked. 'rules' keeps DESIGN.md prose and tokens as inspiration; 'open' drops them too.
+        for i in list(eff):
+            free_log.append({'id': i, 'superseded': eff.pop(i), 'winner': None, 'justification': 'Free exploration run'})
+        if free == 'open':
+            c['markdown'] = '(Free exploration: the project guidelines are intentionally not applied to this run.)'
+            c['tokens'] = {}
     extra = []
     for r in rules:
         if r['id'] in eff:
@@ -184,13 +201,34 @@ def job_context(ctx, ov):
                 {'id': i, 'superseded': eff.pop(i), 'winner': None, 'justification': 'Suspended for this run only'}
             )
     c['effective_rules'] = list(eff.values())
-    c['overrides'] = c.get('overrides', []) + extra
-    c['run_overrides'] = dict(rules=rules, suspend=suspend, prose=prose)
+    c['overrides'] = c.get('overrides', []) + free_log + extra
+    c['run_overrides'] = dict(rules=rules, suspend=suspend, prose=prose, free=free)
     c['hash'] = digest(
-        {'markdown': c['markdown'], 'tokens': c['tokens'], 'effective_rules': c['effective_rules'], 'run_prose': prose}
+        {
+            'markdown': c['markdown'],
+            'tokens': c['tokens'],
+            'effective_rules': c['effective_rules'],
+            'run_prose': prose,
+            'free': free,
+        }
     )
     return c
 
+
+ANGLES = [
+    'calm and reassuring: generous whitespace, quiet colour, minimal chrome, plain gentle language',
+    'bold and confident: a strong type scale, high contrast, decisive colour, short punchy copy',
+    'dense and efficient: information-rich, compact, scannable, built for someone who wants it done fast',
+    'warm and human: friendly voice, rounded shapes, a little personality and illustration',
+    'editorial and content-led: strong hierarchy, long-form clarity, the explanation is the design',
+    'playful and surprising: an unexpected layout or interaction that still gets the job done',
+]
+def spread_offset(board_id):
+    # Rotate the directions each round so a second spread run explores new angles.
+    return sum(1 for j in allof('job') if j.get('board_id') == board_id and j.get('angle'))
+
+
+STATES_NOTE = 'Add the missing realistic states to this screen: an empty state, a loading state, an error/validation state, and a long-content state (long names, long numbers, translated-length text). Keep the existing default design and make each state reachable from the screen (for example a visible state switcher or links) and listed in the manifest states array.'
 
 CONFLICT_PATTERNS = [
     (
@@ -232,6 +270,14 @@ CONFLICT_PATTERNS = [
 ]
 
 
+QUESTION_RE = re.compile(r"^\s*(what|how|why|who|which|when|where|will|can|should|could|is|are|does|do)\b", re.I)
+
+
+def question_shaped(brief):
+    b = (brief or '').strip()
+    return bool(b) and (b.endswith('?') or bool(QUESTION_RE.match(b))) and not re.search(r'\b(design|create|build|make|draft|prototype)\b', b, re.I)
+
+
 def conflict_preview(project_id, brief, overrides=None, reference_ids=None):
     # Advisory only: keyword heuristics comparing the brief, run-only prose and selected reference notes with the active rules. It cannot read images.
     ctx = job_context(get(get(project_id)['context_id']), overrides)
@@ -244,6 +290,18 @@ def conflict_preview(project_id, brief, overrides=None, reference_ids=None):
     if ctx.get('run_overrides', {}).get('prose'):
         sources.append(('run-only prose (applies, but check it)', ctx['run_overrides']['prose']))
     out = []
+    if question_shaped(brief):
+        out.append(
+            dict(
+                id='BRIEF',
+                rule='A brief should say what to design',
+                severity='warning',
+                overridden=False,
+                topic='brief',
+                message='Your brief reads like a question, not an instruction (\u201c' + (brief or '').strip()[:60] + '\u201d).',
+                action='Agents may answer it with a written summary instead of designing screens. Rewrite it as what to design, e.g. \u201cDesign a 3-step application journey that ...\u201d.',
+            )
+        )
     run_ids = {x['id'] for x in ctx.get('run_overrides', {}).get('rules', [])}
     for key, ask, rule_re, label in CONFLICT_PATTERNS:
         hits = [(w, m[0]) for w, t in sources if (m := ask.search(t))]
@@ -304,7 +362,14 @@ def launch(data, kind, project_id):
     if any(r not in enabled for r in runners):
         raise ValueError('Runner is disabled or no longer exists')
     annotations = data.get('annotations', [])
-    if kind == 'revise_board':
+    if kind == 'revise_board' and data.get('states'):
+        # Add realistic states to every screen: virtual feedback, not stored as pins.
+        pv = get(data['parent_id'])
+        annotations = [
+            dict(id='states-' + str(s['id']), variant_id=pv['id'], screen=str(s['id']), comment=STATES_NOTE, virtual=True)
+            for s in pv['manifest']['screens']
+        ]
+    elif kind == 'revise_board':
         ids = data.get('annotation_ids', [])
         annotations = [get(i) for i in ids]
         if not annotations or any(
@@ -362,6 +427,10 @@ def launch(data, kind, project_id):
             if kind == 'generate_board' and board_for_refs and board_for_refs.get('blind')
             else []
         )
+        angle = ''
+        if data.get('spread') and kind == 'generate_board':
+            off = data['spread_offset'] if 'spread_offset' in data else spread_offset(data.get('board_id'))
+            angle = ANGLES[(runners.index(runner_id) + off) % len(ANGLES)]
         j = dict(
             id=uid(),
             project_id=project_id,
@@ -371,7 +440,8 @@ def launch(data, kind, project_id):
             status='queued',
             events=[],
             created_at=time.time(),
-            input_hash=shared,
+            input_hash=digest([shared, angle]) if angle else shared,
+            angle=angle,
             key=key,
             **common,
         )
@@ -410,10 +480,18 @@ def launch(data, kind, project_id):
             if ctx.get('run_overrides', {}).get('prose')
             else ''
         )
+        if j.get('angle'):
+            run_text += '\nDIRECTION FOR THIS VARIANT (the designer wants the runners to diverge; commit to this angle and make it clearly different from a conventional take): ' + j['angle']
+        free_mode = ctx.get('run_overrides', {}).get('free')
+        if free_mode:
+            run_text += (
+                '\nFREE EXPLORATION RUN: the designer has deliberately switched the rules off. Do not try to satisfy any design rules or checks; explore boldly and let the brief lead.'
+                + (' The saved guidelines and tokens are inspiration only.' if free_mode == 'rules' else ' No project guidelines or tokens apply at all.')
+            )
         if blind_labels:
             j['blind_label'] = blind_labels[0]
         j['instruction'] = (
-            f'Task: {kind}. Output contract: static variant-package/1.0 or research.json.\nBrief: {common["brief"]}\nScreens: {common.get("board",{}).get("screens",[])}\nDESIGN.md:\n{ctx["markdown"]}{run_text}\nTokens: {canonical(ctx["tokens"])}\nRules: {canonical(ctx["effective_rules"])}\nSnapshot SHA256: {ctx["hash"]}\nFindings (unverified unless explicitly sourced): {canonical(common["findings"])}\nSupplied sources (preserve provenance): {canonical(common["sources"])}\nAnnotations: {canonical(common["annotations"])}{refs_text}{scope_text}\nYou are running non-interactively: do not ask questions, do not reply with only a plan or summary, and do not wait for confirmation. The task is only complete when the files exist. Only create these file types: .html .css .js .json .png .jpg .svg .woff .woff2 (plus optional .md/.txt notes). Write files to output/. Research output: research.json with a findings array (id,title,detail,confidence,source_ids) and an optional limitations array. Cite supplied sources only by their id; do not invent sources or URLs and do not label anything verified (the studio assigns provenance labels itself). State plainly what you could not check. Variant output: manifest.json with schema_version=1.0, kind=clickthrough-static, board_id, start_screen_id=0 (string), screens array with id as zero-based string, title, file=screens/<id>.html, states array; edges with from,to,trigger. All requested screens must exist. Use data-role=primary-action on primary controls and data-design-id on annotation targets. For a revision, output/ ALREADY CONTAINS a full copy of the parent version: edit those files in place and leave everything not covered by the revision scope untouched. No external dependencies. Enumerate files and any guidelines you could not honor; self-report is not validation.'
+            f'Task: {kind}. Output contract: static variant-package/1.0 or research.json.\nBrief: {common["brief"]}\nScreens: {common.get("board",{}).get("screens",[])}\nDESIGN.md:\n{ctx["markdown"]}{run_text}\nTokens: {canonical(ctx["tokens"])}\nRules: {canonical(ctx["effective_rules"])}\nSnapshot SHA256: {ctx["hash"]}\nFindings (unverified unless explicitly sourced): {canonical(common["findings"])}\nSupplied sources (preserve provenance): {canonical(common["sources"])}\nAnnotations: {canonical(common["annotations"])}{refs_text}{scope_text}\nYou are running non-interactively: do not ask questions, do not reply with only a plan or summary, and do not wait for confirmation. The task is only complete when the files exist. Only create these file types: .html .css .js .json .png .jpg .svg .woff .woff2 (plus optional .md/.txt notes). Write files to output/. Research output: research.json with a findings array (id,title,detail,confidence,source_ids) and an optional limitations array. Cite supplied sources only by their id; do not invent sources or URLs and do not label anything verified (the studio assigns provenance labels itself). State plainly what you could not check. Variant output (a generate or revise task): the screens must be a working product interface for the audience in the brief (headings, navigation, forms, inputs, buttons, states). Never write an article, report or summary of research findings as a screen; findings are inputs that shape what the screens contain. If the brief reads like a question, treat it as the topic to design an interface for. Variant output: manifest.json with schema_version=1.0, kind=clickthrough-static, board_id, start_screen_id=0 (string), screens array with id as zero-based string, title, file=screens/<id>.html, states array; edges with from,to,trigger. All requested screens must exist. Use data-role=primary-action on primary controls and data-design-id on annotation targets. For a revision, output/ ALREADY CONTAINS a full copy of the parent version: edit those files in place and leave everything not covered by the revision scope untouched. No external dependencies. Enumerate files and any guidelines you could not honor; self-report is not validation.'
         )
         save('job', j)
         jobs.append(j)
@@ -423,7 +501,7 @@ def launch(data, kind, project_id):
         board_for_refs['reference_ids'] = [r['id'] for r in references]
         save('board', board_for_refs)
     for a in annotations:
-        if kind == 'revise_board':
+        if kind == 'revise_board' and not a.get('virtual'):
             a = get(a['id'])
             a.update(status='applied', job_ids=[j['id'] for j in jobs])
             save('annotation', a)

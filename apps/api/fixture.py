@@ -5,7 +5,7 @@ import re, html
 
 def fixture_tokens(ctx):
     # Deliberately small, explicit fixture vocabulary; not a general language model.
-    tokens = dict(ctx['tokens'])
+    tokens = dict(ctx['tokens'] or {'ink': '#111111', 'background': '#ffffff', 'accent': '#2563eb', 'muted': '#6b7280'})
     colors = {
         'pink': '#db2777',
         'red': '#dc2626',

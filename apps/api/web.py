@@ -1,14 +1,15 @@
 """HTTP layer: studio API handler, share listener, health check and process entry point."""
 
-import signal, sys, os, json, hashlib, threading, time, re, zipfile, io, shutil
+import ipaddress, socket, signal, sys, os, json, hashlib, threading, time, re, zipfile, io, shutil
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 from local_agents import discover, configuration, bwrap_ok
-from boards import blind_choice, conflict_preview, create_board, hidden_job_file, launch, mask_state, set_blind
+from boards import blind_choice, conflict_preview, create_board, hidden_job_file, launch, mask_state, set_blind, spread_offset
 from contexts import context, project, seed
 from core import LOCK, ROOT, SHARE_PORT, STARTED, allof, db, get, log, safe_path, save, setup_logging, uid
-from jobs import JOBQ, WORKERS, cancel_job, recover_jobs, retry_job, start_workers, stop_workers
-from prototypes import approve, mix_variants, set_review_state
+from jobs import JOBQ, MAX_JOBS, job_progress, WORKERS, cancel_job, recover_jobs, retry_job, start_workers, stop_workers
+from prototypes import approve, mix_variants, set_aside, set_review_state
+from audit import apply_style, audit_review, audit_variant, extract_style, launch_doc_review, read_review_folder
 from references import add_reference, delete_reference
 from sharing import SHARE_JS, SHARE_PLAYER, share_create, share_find, share_revoke
 import core
@@ -95,12 +96,63 @@ class ShareHandler(BaseHTTPRequestHandler):
 ALLOWED_HOSTS = {'localhost', '127.0.0.1', '[::1]'}
 
 
+UI_DIST = ROOT / 'apps/ui/dist'
+LOOPBACK_BINDS = {'127.0.0.1', 'localhost', '::1'}
+# Actions that decide which programs the studio runs and how they are confined. In LAN mode only the machine
+# running the studio may use them: anyone else on the network could otherwise register an arbitrary executable.
+RUNNER_ADMIN = {'runner', 'local-runner', 'update-runner', 'delete-runner', 'test-runner', 'set-review-folder'}
+
+
+def lan_mode():
+    return os.environ.get('STUDIO_HOST', '127.0.0.1').strip().lower() not in LOOPBACK_BINDS
+
+
+def is_loopback_client(addr):
+    try:
+        return ipaddress.ip_address(addr.split('%')[0]).is_loopback
+    except ValueError:
+        return False
+
+
+def _plain(addr):
+    a = addr.split('%')[0]
+    return a[7:] if a.lower().startswith('::ffff:') else a
+
+
+def is_local_client(client, server):
+    # Local = loopback, or the computer talking to its own network address (e.g. http://192.168.x.x:5173 opened on the host itself).
+    # A remote device never has the host's own address as its source address.
+    return is_loopback_client(client) or _plain(client) == _plain(server)
+
+
+def lan_ips():
+    ips = set()
+    for target in ('10.255.255.255', '192.168.255.255', '172.16.255.255'):  # no packets are sent; this picks the outgoing interface
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as c:
+                c.connect((target, 1))
+                if not c.getsockname()[0].startswith('127.'):
+                    ips.add(c.getsockname()[0])
+        except OSError:
+            pass
+    return sorted(ips)
+
+
 def host_ok(host):
-    # DNS-rebinding guard: the studio can start local agents, so only loopback host names are served.
-    h = (host or '').rsplit(':', 1)[0] if not (host or '').endswith(']') else host
-    return h.lower() in ALLOWED_HOSTS or h.lower() in {
-        x.strip().lower() for x in os.environ.get('STUDIO_ALLOWED_HOSTS', '').split(',') if x.strip()
-    }
+    # DNS-rebinding guard: the studio can start local agents, so only loopback names are served.
+    # In LAN mode IP literals (an attacker's DNS name cannot be one) and this machine's own host names are served too.
+    host = (host or '').strip()
+    h = host.lower() if host.endswith(']') else host.rsplit(':', 1)[0].lower()
+    if h in ALLOWED_HOSTS or h in {x.strip().lower() for x in os.environ.get('STUDIO_ALLOWED_HOSTS', '').split(',') if x.strip()}:
+        return True
+    if not lan_mode():
+        return False
+    try:
+        ipaddress.ip_address(h.strip('[]'))
+        return True
+    except ValueError:
+        me = socket.gethostname().lower()
+        return h in (me, me + '.local', me.split('.')[0] + '.local')
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -139,12 +191,18 @@ class Handler(SimpleHTTPRequestHandler):
         if self.deny_host():
             return
         try:
+            if path == '/favicon.ico':
+                self.send_response(204)
+                self.end_headers()
+                return
+            if path.startswith('/api/job-progress/'):
+                return self.send_json(job_progress(path.rsplit('/', 1)[-1]))
             if path == '/api/health':
                 return self.send_json(health())
             if path == '/api/local-agents':
                 return self.send_json(discover())
             if path == '/api/config':
-                return self.send_json(dict(bwrap=bwrap_ok(), share_port=SHARE_PORT))
+                return self.send_json(dict(bwrap=bwrap_ok(), share_port=SHARE_PORT, max_jobs=MAX_JOBS))
             if path == '/api/state':
                 data = json.dumps(
                     mask_state(
@@ -203,16 +261,35 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json({'message': 'Hidden while this comparison is blind'}, 403)
                 f = safe_path(core.STORE, path[len('/assets/') :])
             else:
-                f = (
-                    safe_path(ROOT / 'apps/web', path.lstrip('/'))
-                    if '.' in path.split('/')[-1]
-                    else ROOT / 'apps/web/index.html'
-                )
+                if not (UI_DIST / 'index.html').is_file():
+                    msg = b'The UI has not been built yet. Run:  make ui-build   (needs Node 20+), then reload.'
+                    self.send_response(503)
+                    self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                    self.send_header('Content-Length', str(len(msg)))
+                    self.end_headers()
+                    return self.wfile.write(msg)
+                # Single-page app: real files (hashed /ui/ assets) are served as-is, every other path gets index.html.
+                f = safe_path(UI_DIST, path.lstrip('/')) if '.' in path.split('/')[-1] else UI_DIST / 'index.html'
             if not f.is_file():
                 return self.send_error(404)
             import mimetypes
 
+            body = f.read_bytes()
+            ui = not path.startswith('/assets/')
+            hashed = path.startswith('/ui/')
+            tag = '"' + hashlib.sha256(body).hexdigest()[:20] + '"'
+            if ui and not hashed and self.headers.get('If-None-Match') == tag:
+                self.send_response(304)
+                self.send_header('ETag', tag)
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+                return
             self.send_response(200)
+            if hashed:  # content-hashed build output never changes under the same name
+                self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
+            elif ui:  # index.html names the current build; browsers (iOS Safari especially) must revalidate it
+                self.send_header('Cache-Control', 'no-cache')
+                self.send_header('ETag', tag)
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header(
                 'Content-Security-Policy',
@@ -223,8 +300,9 @@ class Handler(SimpleHTTPRequestHandler):
                 ),
             )
             self.send_header('Content-Type', mimetypes.guess_type(f)[0] or 'application/octet-stream')
+            self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(f.read_bytes())
+            self.wfile.write(body)
         except Exception as e:
             self.send_json({'message': str(e)}, 400)
 
@@ -247,6 +325,8 @@ class Handler(SimpleHTTPRequestHandler):
             if not isinstance(d, dict):
                 raise ValueError('Request body must be a JSON object')
             action = self.path.split('/')[-1]
+            if lan_mode() and action in RUNNER_ADMIN and not is_local_client(self.client_address[0], self.connection.getsockname()[0]):
+                raise ValueError('Runner settings can only be changed from the computer running the studio')
             if action == 'local-runner':
                 result = save('runner', dict(id=uid(), **configuration(d['agent'], d.get('model', ''))))
             elif action == 'project':
@@ -280,6 +360,21 @@ class Handler(SimpleHTTPRequestHandler):
                     save('board', board)
                     jobs = launch(dict(d, board_id=board['id']), 'generate_board', d['project_id'])
                 result = {'board': board, 'jobs': jobs}
+            elif action == 'generate' and d.get('pair_free'):
+                # Rules vs free: the same brief, runners, references and directions twice, once as configured and once with the rules off.
+                b = get(d['board_id'])
+                if b.get('blind'):
+                    raise ValueError('Rules-vs-free pairs are not available while a board is blind; they would reveal which run is which')
+                level = d['pair_free'] if d['pair_free'] in ('rules', 'open') else 'open'
+                off = spread_offset(d['board_id'])
+                key = d.get('idempotency_key')
+                base = dict(d, spread_offset=off)
+                normal = launch(base, 'generate_board', d['project_id'])
+                free_ov = dict(d.get('overrides') or {}, free=level)
+                free = launch(dict(base, overrides=free_ov, idempotency_key=(key + ':free') if key else None), 'generate_board', d['project_id'])
+                result = normal + free
+            elif action == 'revise' and d.get('states'):
+                result = launch(dict(d, states=True), 'revise_board', d['project_id'])
             elif action in ['research', 'generate', 'revise']:
                 result = launch(
                     d,
@@ -330,11 +425,35 @@ class Handler(SimpleHTTPRequestHandler):
             elif action == 'share-revoke':
                 result = share_revoke(d['prototype_id'], d['token'])
             elif action == 'approve':
-                result = approve(d['id'])
+                result = approve(d['id'], d.get('note', ''))
+            elif action == 'set-aside':
+                result = set_aside(d['id'], d.get('note', ''))
             elif action == 'accept-revision':
-                result = set_review_state(d['id'], 'accepted')
+                result = set_review_state(d['id'], 'accepted', d.get('note', ''))
             elif action == 'revert-revision':
-                result = set_review_state(d['id'], 'reverted')
+                result = set_review_state(d['id'], 'reverted', d.get('note', ''))
+            elif action == 'audit':
+                result = audit_variant(d['variant_id'])
+            elif action == 'audit-docs':
+                result = launch_doc_review(d['variant_id'], d['runner_id'])
+            elif action == 'audit-review':
+                result = audit_review(d['variant_id'], d['audit_id'], d['index'], d['decision'], d.get('note', ''))
+            elif action == 'set-review-folder':
+                folder = str(d.get('folder', '')).strip()
+                info = read_review_folder(folder)
+                if folder and info['error']:
+                    raise ValueError(info['error'])
+                p = get(d['project_id'])
+                p['review_folder'] = info['folder']
+                save('project', p)
+                result = dict(project=p, docs=[dict(file=x['file'], title=x['title'], criteria=len(x['criteria'])) for x in info['docs']], skipped=info['skipped'])
+            elif action == 'review-docs':
+                info = read_review_folder(get(d['project_id']).get('review_folder', ''))
+                result = dict(folder=info['folder'], error=info['error'], skipped=info['skipped'], docs=[dict(file=x['file'], title=x['title'], criteria=len(x['criteria'])) for x in info['docs']])
+            elif action == 'extract-style':
+                result = extract_style(d['variant_id'])
+            elif action == 'apply-style':
+                result = apply_style(d['project_id'], d.get('tokens'))
             elif action == 'review-check':
                 v = get(d['variant_id'])
                 if d['decision'] not in ['accepted', 'needs_change', 'open']:
@@ -361,6 +480,12 @@ class Handler(SimpleHTTPRequestHandler):
             elif action == 'cancel-job':
                 cancel_job(d['id'])
                 result = {'cancelling': d['id']}
+            elif action == 'dismiss-job':
+                j = get(d['id'])
+                if j['status'] in ('queued', 'running'):
+                    raise ValueError('Cancel a running job before dismissing it')
+                j['dismissed'] = True
+                result = save('job', j)
             elif action == 'retry-job':
                 result = retry_job(d['id'])
             elif action == 'update-runner':
@@ -377,9 +502,11 @@ class Handler(SimpleHTTPRequestHandler):
                         raise ValueError('bubblewrap is not usable on this machine')
                     r['sandbox'] = 'bwrap' if d['sandbox'] == 'bwrap' else None
                     if r.get('agent'):
-                        r['args'] = configuration(r['agent'], r.get('model', ''), sandbox=bool(r['sandbox']))[
-                            'args'
-                        ]  # the agent's own sandbox flag must follow ours
+                        # The agent's own flags must follow ours, and runners created before the sandbox existed lack
+                        # the bind lists it needs (install and auth folders), so refresh those too.
+                        cfg = configuration(r['agent'], r.get('model', ''), sandbox=bool(r['sandbox']))
+                        r['args'] = cfg['args']
+                        r['sandbox_ro'], r['sandbox_rw'] = cfg['sandbox_ro'], cfg['sandbox_rw']
                 if 'env_allowlist' in d:
                     names = [str(x).strip() for x in d['env_allowlist'] if str(x).strip()]
                     if any(not re.fullmatch(r'[A-Z_][A-Z0-9_]*', n) for n in names):
@@ -478,7 +605,8 @@ def main():
         print('Design Studio: PORT must be an integer from 1 to 65535.', file=sys.stderr)
         return 1
     try:
-        server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+        bind = os.environ.get('STUDIO_HOST', '127.0.0.1').strip() or '127.0.0.1'
+        server = ThreadingHTTPServer((bind, port), Handler)
     except OSError as error:
         if error.errno == errno.EADDRINUSE:
             print(
@@ -491,7 +619,7 @@ def main():
                 file=sys.stderr,
             )
         else:
-            print(f'Design Studio: cannot listen on 127.0.0.1:{port}: {error}', file=sys.stderr)
+            print(f'Design Studio: cannot listen on {bind}:{port}: {error}', file=sys.stderr)
         return 1
     share = None
     if SHARE_PORT:
@@ -513,6 +641,10 @@ def main():
         if resumed:
             print(f'Resumed {resumed} queued job(s) after restart', flush=True)
         print(f'Design Studio → http://localhost:{port}', flush=True)
+        if lan_mode():
+            urls = [f'http://{ip}:{port}' for ip in lan_ips()] or [f'http://<this-computer>:{port}']
+            print('LAN mode: reachable from your network at ' + ', '.join(urls), flush=True)
+            print('  No login: anyone on this network can use the studio and spend your agent credits. Runner settings stay local-only.', flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

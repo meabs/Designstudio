@@ -25,4 +25,13 @@ Persistent projects, archive/rename/restore, context versions and checksums, tok
 
 The full build specification acceptance checklist has not been formally certified. This repository is a working implementation to extend.
 - Run-only overrides change what the agent is told, not what the studio checks beyond the rules you keep; a replaced rule is validated by its new wording only if it is deterministic. The agent self-report is parsed with regexes from free text, can miss or misread a line, and is unverified. The conflict preview is a keyword heuristic that cannot read reference images, so it has false positives and misses.
-- POC scope: single user, single machine, no authentication on the studio port (protected only by loopback binding and the Host check). State polling still recomputes the full state on the server every 2 s (the ETag only saves transfer). The API is split into small modules (see README "Code layout"), but the entity store is still one generic SQLite table with no migrations, and the UI is plain JS without a framework. Backups are manual (`make backup`).
+- POC scope: single user, single machine, no authentication on the studio port (protected only by loopback binding and the Host check). State polling still recomputes the full state on the server every 2 s (the ETag only saves transfer). The API is split into small modules (see README "Code layout"), but the entity store is still one generic SQLite table with no migrations, and the UI needs Node 20+ to build (running it does not). Backups are manual (`make backup`).
+
+
+## Designer tools (audit, free runs, pairs)
+
+- The audit is static: it parses the delivered HTML/CSS and never renders or runs it. Contrast is measured only from explicit colours in CSS (opacity, gradients, images and computed styles are not), and tap-target size only from declared px sizes. It is evidence for a reviewer, not WCAG or legal certification.
+- Document criteria are literal: a quoted phrase must (or must not) appear in the visible text. Anything else is listed for human judgement. The optional agent reading of your documents is an unverified opinion from a coding agent that sees only static files; it can be wrong or overconfident and is never a sign-off.
+- Rule-break logs use the project's current saved guidelines at generation time and the same deterministic checks as normal runs; most prose rules can only be listed for review.
+- Rules-vs-free doubles agent runs and cost. Spread directions are keyed to runner order, so they are comparable between a pair but not between rounds.
+- Style extraction lists hex colours, font stacks and px radii; it does not infer roles (accent vs background) or spacing scales.
