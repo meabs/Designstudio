@@ -7,14 +7,14 @@
     "render": "remotion render src/index.ts Landscape out/design-studio-landscape.mp4 && remotion render src/index.ts Portrait out/design-studio-portrait.mp4"
   },
   "dependencies": {
-    "@remotion/cli": "^4.0.355",
-    "@remotion/google-fonts": "^4.0.355",
-    "@remotion/media-utils": "^4.0.355",
-    "@remotion/transitions": "^4.0.355",
+    "@remotion/cli": "^4.0.543",
+    "@remotion/google-fonts": "^4.0.543",
+    "@remotion/media-utils": "^4.0.543",
+    "@remotion/transitions": "^4.0.543",
     "@types/react": "^19.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "remotion": "^4.0.355"
+    "remotion": "^4.0.543"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
