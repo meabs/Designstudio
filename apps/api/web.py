@@ -569,9 +569,15 @@ class Handler(SimpleHTTPRequestHandler):
                 )
                 result = save('board', b)
             elif action == 'runner':
-                if d['type'] not in ['fixture', 'cli']:
-                    raise ValueError('Unsupported runner')
-                result = save('runner', dict(id=uid(), **d))
+                # Never accept an executable from the API: coding agents come only from the installed-agent scan (local-runner).
+                if d.get('type') == 'cli' and os.environ.get('STUDIO_UNSAFE_TEST_RUNNERS') == '1' and not lan_mode():
+                    # Test-only escape hatch (off by default, ignored in LAN mode): lets the browser tests register scripted fake agents.
+                    result = save('runner', dict(id=uid(), name=str(d.get('name', 'Test CLI'))[:60], type='cli', executable=str(d['executable']), args=[str(a) for a in d.get('args', [])], timeout=int(d.get('timeout', 60)), enabled=True, **{k: d[k] for k in ('auto_retries', 'sandbox') if k in d}))
+                elif d.get('type') == 'fixture':
+                    style = d.get('style') if d.get('style') in ('a', 'b') else 'a'
+                    result = save('runner', dict(id=uid(), name=' '.join(str(d.get('name') or 'Template').split())[:60], type='fixture', style=style))
+                else:
+                    raise ValueError('Only template runners can be added here. Add coding agents from Settings → Agents (installed agents only).')
             elif action == 'test-runner':
                 r = get(d['id'])
                 result = {

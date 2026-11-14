@@ -93,6 +93,27 @@ class LanModeTest(unittest.TestCase):
     self.assertEqual(len(s.allof('runner')),2)
     self.assertEqual(self.call('/api/project',{'name':'from phone'})[0],200)   # normal design work is allowed
    self.assertEqual(self.call('/api/test-runner',{'id':s.allof('runner')[0]['id']})[0],200)  # local machine still can
+ def test_runner_registration_never_accepts_an_executable(self):
+  n=len(s.allof('runner'))
+  for body in ({'type':'cli','executable':'/bin/bash','args':['-c','id'],'name':'x'},{'type':'cli','name':'x'},{'type':'shell'},{}):
+   code,msg,_=self.call('/api/runner',body); self.assertEqual(code,400,body); self.assertEqual(len(s.allof('runner')),n)
+  code,r,_=self.call('/api/runner',{'type':'fixture','name':'My template','style':'b','executable':'/bin/bash','args':['x']}); self.assertEqual(code,200)
+  self.assertEqual({k for k in r if k!='id'},{'name','type','style'}); self.assertEqual(r['style'],'b')
+  code,_,_=self.call('/api/local-runner',{'agent':'definitely-not-installed'}); self.assertEqual(code,400)
+ def test_test_runner_escape_hatch_is_off_by_default_and_never_in_lan_mode(self):
+  body={'type':'cli','executable':'/bin/true','args':[],'name':'t'}
+  self.assertEqual(self.call('/api/runner',body)[0],400)
+  with patch.dict('os.environ',{'STUDIO_UNSAFE_TEST_RUNNERS':'1'}): self.assertEqual(self.call('/api/runner',body)[0],200)
+  with patch.dict('os.environ',{'STUDIO_UNSAFE_TEST_RUNNERS':'1','STUDIO_HOST':'0.0.0.0'}): self.assertEqual(self.call('/api/runner',body)[0],400)
+ def test_scan_guidelines_refuses_folders_outside_the_allowlist(self):
+  with tempfile.TemporaryDirectory() as t, patch.dict('os.environ',{'STUDIO_FOLDER_ROOTS':str(Path(t).resolve()/'ok')}):
+   (Path(t)/'ok').mkdir(); (Path(t)/'secret').mkdir(); (Path(t)/'secret'/'tokens.json').write_text('{"api-key":"hunter2hunter2"}')
+   code,body,raw=self.call('/api/scan-guidelines',{'folder':str(Path(t)/'secret')}); self.assertEqual(code,400); self.assertNotIn('hunter2',json.dumps(body))
+   code,_,_=self.call('/api/scan-guidelines',{'folder':str(Path(t)/'ok')}); self.assertEqual(code,200)
+ def test_set_review_folder_obeys_the_allowlist(self):
+  pid=s.allof('project')[0]['id']
+  with tempfile.TemporaryDirectory() as t, patch.dict('os.environ',{'STUDIO_FOLDER_ROOTS':str(Path(t).resolve()/'ok')}):
+   (Path(t)/'bad').mkdir(); code,_,_=self.call('/api/set-review-folder',{'project_id':pid,'folder':str(Path(t)/'bad')}); self.assertEqual(code,400); self.assertFalse(s.get(pid).get('review_folder'))
  def test_a_computer_using_its_own_network_address_counts_as_local(self):
   self.assertTrue(web.is_local_client('192.168.1.152','192.168.1.152')); self.assertTrue(web.is_local_client('::ffff:192.168.1.152','192.168.1.152')); self.assertTrue(web.is_local_client('127.0.0.1','192.168.1.152'))
   self.assertFalse(web.is_local_client('192.168.1.77','192.168.1.152'))

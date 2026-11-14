@@ -39,3 +39,6 @@ The full build specification acceptance checklist has not been formally certifie
 - Guideline import is heuristic: it decides what is a rule from file names, headings and wording ("must", "never", checklists), so prose-only guidance is imported as text, not rules, and a stray "must" bullet may need unticking. It reads `.md`, `.json` and `.css` only (no Figma, no Word/PDF). Re-importing is manual; the studio does not watch the folder.
 
 - Profiles are whole sets, not layers: a new profile is a copy, so later edits to Main don't flow into it. Running several profiles multiplies runs and cost by the number ticked. On a blind board the UI hides profile names, but the underlying API data still carries them.
+
+- Template (fixture) runners produce generic sample screens: they show the brief as text but do not interpret it, so they prove the interface, not design quality. Judge the studio with a real coding agent on a real brief.
+- Folder reads are limited to `STUDIO_FOLDER_ROOTS` (default: your home folder). Anything else must be supplied with the browser file chooser.

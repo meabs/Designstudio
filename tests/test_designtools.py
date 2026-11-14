@@ -8,7 +8,8 @@ class DesignToolsTest(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory(); self.old=s.STORE; s.STORE=Path(self.tmp.name)/'store'; s.STORE.mkdir(); s.seed(); self.p=s.allof('project')[0]; self.b=s.allof('board')[0]
   self.r=[r['id'] for r in s.allof('runner')]; self.docs=Path(self.tmp.name)/'docs'; self.docs.mkdir()
- def tearDown(self): s.STORE=self.old; self.tmp.cleanup()
+  self.env=patch.dict('os.environ',{'STUDIO_FOLDER_ROOTS':str(Path(self.tmp.name).resolve())}); self.env.start()
+ def tearDown(self): self.env.stop(); s.STORE=self.old; self.tmp.cleanup()
  def launch(self,kind='generate_board',**kw):
   with patch.object(boards,'enqueue'): return s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=self.r[:2],**kw),kind,self.p['id'])
  def run_job(self,j):

@@ -6,6 +6,7 @@ Remotion project that renders the promo (landscape 1920Ã—1080 and portrait 1080Ã
 npm install
 # 1. demo data: a throwaway Design Studio on :5196 with real Claude Code + Codex runs (see record/ and ../README)
 # 2. record the clips (Chrome screencast -> ffmpeg), e.g.
+# the demo server needs STUDIO_FOLDER_ROOTS=/tmp so it may read the sample brand and review folders
 node record/scenes.mjs board generate progress compare guidelines review audit decisions phone
 # 3. music (original, synthesised with ffmpeg)
 python3 music.py

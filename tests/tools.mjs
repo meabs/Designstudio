@@ -1,6 +1,6 @@
 // End-to-end for the designer tools: spread, rules-vs-free pairs, rule-break log, audit with review documents,
 // style extraction, realistic states, set-aside decision log, responsive preview.
-//   STUDIO_STORAGE=$(mktemp -d) PORT=5198 python3 apps/api/server.py   then   STUDIO_URL=http://localhost:5198 node tests/tools.mjs
+//   STUDIO_FOLDER_ROOTS=/tmp STUDIO_STORAGE=$(mktemp -d) PORT=5198 python3 apps/api/server.py   then   STUDIO_URL=http://localhost:5198 node tests/tools.mjs
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';

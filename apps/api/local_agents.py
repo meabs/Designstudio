@@ -1,5 +1,5 @@
 """Discover binaries and non-secret local model metadata. Never read credentials."""
-import json, os, shutil, subprocess
+import re, json, os, shutil, subprocess
 from functools import lru_cache
 from pathlib import Path
 
@@ -35,6 +35,8 @@ def discover():
 def configuration(agent,model,sandbox=None):
  # sandbox: whether the studio's own filesystem sandbox (bubblewrap) wraps this agent. Default: on when usable.
  sandbox=bwrap_ok() if sandbox is None else bool(sandbox)
+ model=str(model or '').strip()
+ if model and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}',model): raise ValueError('Model IDs may only contain letters, numbers and . _ : / @ -')
  installed=next((a for a in discover() if a['id']==agent),None)
  if not installed or not installed['supported']: raise ValueError('No supported adapter for this installed agent')
  # Codex's own sandbox cannot start inside ours (nested user namespaces are denied), so exactly one layer confines it:

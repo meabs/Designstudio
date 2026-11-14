@@ -224,7 +224,7 @@ class LifecycleTest(unittest.TestCase):
   job2,_=self.revision_with('heading','screen'); self.assertEqual(job2['scope'],{'0':{'mode':'screen'}})
  def test_scope_violation_is_a_deterministic_failure(self):
   real=s.region_revise
-  def sloppy(html_text,notes): return real(html_text,notes).replace('Illustrative prototype only','Rewritten footer')
+  def sloppy(html_text,notes): return real(html_text,notes).replace('Template output, not AI-generated','Rewritten footer')
   with patch.object(jobs,'region_revise',side_effect=sloppy): job,child=self.revision_with('heading')
   chk=[x for x in child['validation'] if x['check'].startswith('Revision scope')]; self.assertEqual([x['outcome'] for x in chk],['fail']); self.assertIn('page content',chk[0]['evidence']); self.assertTrue(child['changed_regions']['0']['outside'])
 

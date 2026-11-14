@@ -7,6 +7,7 @@ no symlinks, bounded) or files the browser uploads.
 
 import json, re
 from pathlib import Path
+from core import check_folder
 
 MAX_FILES = 80
 MAX_BYTES = 300_000
@@ -116,6 +117,31 @@ def rules_from_md(name, text, rule_file):
     return out
 
 
+def rules_from_json(name, text):
+    # A rules file: a list of rule objects, or {"rules": [...], "tokens": {...}} (the studio's own export shape works too).
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    items, extra = (data, {}) if isinstance(data, list) else ((data.get('rules'), {}) if isinstance(data, dict) and isinstance(data.get('rules'), list) else (None, {}))
+    if items is None or not items or not all(isinstance(x, dict) and str(x.get('description', '')).strip() for x in items):
+        return None
+    out = []
+    for n, x in enumerate(items[:MAX_RULES], 1):
+        rid = str(x.get('id') or '').strip() or None
+        if rid and not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', rid):
+            rid = None
+        sev = x.get('severity') if x.get('severity') in ('error', 'warning', 'info') else 'warning'
+        out.append(dict(id=rid, description=clean_text(str(x['description']))[:400], severity=sev, source=f'{name}[{n}]'))
+    tokens = {}
+    if isinstance(data, dict) and isinstance(data.get('tokens'), dict):
+        for k, v in flatten(data['tokens']).items():
+            tk, tv = token_name(k), token_value(v)
+            if tk and tv is not None:
+                tokens[tk] = tv
+    return out, tokens
+
+
 def parse_files(files):
     """files: [{name, text}] -> candidates for guidelines markdown, rules and tokens."""
     docs, rules, tokens, skipped = [], [], {}, []
@@ -131,6 +157,14 @@ def parse_files(files):
             continue
         base = Path(name).name
         if ext == '.json':
+            jr = rules_from_json(name, text)
+            if jr is not None:
+                rules += jr[0]
+                for k, v in jr[1].items():
+                    if k not in tokens and len(tokens) < MAX_TOKENS:
+                        tokens[k] = v
+                        token_sources[k] = name
+                continue
             found, err = tokens_from_json(text)
             if err:
                 skipped.append(f'{name} ({err})')
@@ -190,13 +224,9 @@ def parse_files(files):
 
 
 def read_folder(path):
-    path = str(path or '').strip()
-    if not path:
+    if not str(path or '').strip():
         raise ValueError('Enter the path to a folder')
-    root = Path(path).expanduser()
-    if not root.is_dir():
-        raise ValueError('Folder not found. Enter the full path to a folder on this computer.')
-    root = root.resolve()
+    root = check_folder(path)
     files, skipped = [], []
     for f in sorted(root.rglob('*')):
         if not f.is_file() or f.suffix.lower() not in TEXT_EXT:

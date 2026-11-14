@@ -32,6 +32,26 @@ STARTED = time.time()
 SHARE_PORT = int(os.environ.get('STUDIO_SHARE_PORT', '0') or 0)
 
 
+def allowed_roots():
+    # Folders the studio may read on request (guideline import, review documents). Default: your home folder only.
+    raw = os.environ.get('STUDIO_FOLDER_ROOTS', '').strip()
+    return [Path(p).expanduser().resolve() for p in raw.split(os.pathsep) if p.strip()] if raw else [Path.home().resolve()]
+
+
+def check_folder(path):
+    # Resolve symlinks first, then require the folder to sit inside an allowed root and not inside a hidden directory (.ssh, .config...).
+    root = Path(str(path or '').strip()).expanduser()
+    if not root.is_dir():
+        raise ValueError('Folder not found. Enter the full path to a folder on this computer.')
+    root = root.resolve()
+    for base in allowed_roots():
+        if root.is_relative_to(base):
+            if any(part.startswith('.') for part in root.relative_to(base).parts):
+                raise ValueError('Hidden folders cannot be read')
+            return root
+    raise ValueError('That folder is outside the places the studio may read (by default your home folder). Set STUDIO_FOLDER_ROOTS to allow more.')
+
+
 def uid():
     return uuid.uuid4().hex[:16]
 

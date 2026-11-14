@@ -1,5 +1,5 @@
 // End-to-end happy path plus failure handling, driven through the real UI.
-// Run against a disposable server:  STUDIO_STORAGE=$(mktemp -d) PORT=5199 python3 apps/api/server.py
+// Run against a disposable server:  STUDIO_UNSAFE_TEST_RUNNERS=1 STUDIO_STORAGE=$(mktemp -d) PORT=5199 python3 apps/api/server.py
 //   STUDIO_URL=http://localhost:5199 node tests/browser.mjs
 // Uses fixture runners only; never calls a real coding agent.
 import { chromium } from '@playwright/test';

@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 import core
 from contexts import current_context
-from core import allof, digest, get, save, uid, safe_path
+from core import allof, check_folder, digest, get, save, uid, safe_path
 
 MAX_DOCS = 60
 MAX_DOC_BYTES = 200_000
@@ -37,10 +37,10 @@ def read_review_folder(path):
     path = str(path or '').strip()
     if not path:
         return dict(folder='', docs=[], skipped=[], error='')
-    root = Path(path).expanduser()
-    if not root.is_dir():
-        return dict(folder=path, docs=[], skipped=[], error='Folder not found. Enter the full path to a folder of .md files.')
-    root = root.resolve()
+    try:
+        root = check_folder(path)
+    except ValueError as e:
+        return dict(folder=path, docs=[], skipped=[], error=str(e))
     docs, skipped = [], []
     for f in sorted(root.rglob('*.md')):
         if len(docs) >= MAX_DOCS:

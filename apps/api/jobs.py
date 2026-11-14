@@ -1,6 +1,6 @@
 """Durable job queue, workers, sandboxed runner execution, retries and agent self-report parsing."""
 
-import os, json, threading, time, re, subprocess, shutil, queue
+import os, json, signal, threading, time, re, subprocess, shutil, queue
 from pathlib import Path
 from local_agents import bwrap_ok
 from core import LOCK, allof, get, log, safe_path, save, uid
@@ -456,6 +456,7 @@ def _execute(j):
                     variant['style'],
                     bool(matching),
                     ' '.join(a['comment'] for a in matching),
+                    brief=j.get('brief', ''),
                 )
                 if parent and not matching:
                     content = parent_html
@@ -628,26 +629,7 @@ def _execute(j):
             (folder / 'thumbnails').mkdir(exist_ok=True)
             for s in manifest['screens']:
                 check_cancel(j)
-                try:
-                    subprocess.run(
-                        [
-                            'google-chrome',
-                            '--headless',
-                            '--no-sandbox',
-                            '--disable-gpu',
-                            '--hide-scrollbars',
-                            '--no-pdf-header-footer',
-                            '--window-size=720,960',
-                            f'--user-data-dir=/tmp/studio-chrome-{j["id"]}',
-                            f'--screenshot={folder}/thumbnails/{s["id"]}.png',
-                            safe_path(folder, s['file']).as_uri(),
-                        ],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=20,
-                    )
-                except (FileNotFoundError, subprocess.TimeoutExpired):
-                    pass
+                chrome_screenshot(j['id'], safe_path(folder, s['file']), folder / 'thumbnails' / f'{s["id"]}.png')
                 if not (folder / 'thumbnails' / f'{s["id"]}.png').is_file():
                     variant['validation'].append(
                         dict(
@@ -656,6 +638,7 @@ def _execute(j):
                             evidence='Local Chrome capture unavailable',
                         )
                     )
+            shutil.rmtree(f'/tmp/studio-chrome-{j["id"]}', ignore_errors=True)  # one throwaway Chrome profile per job
             check_cancel(j)
             save('variant', variant)
             j['variant_id'] = variant['id']
@@ -669,6 +652,31 @@ def _execute(j):
         event(j, 'timed_out', 'Runner exceeded the configured timeout; partial log kept in job history')
     except Exception as e:
         event(j, 'failed', str(e))
+
+
+def chrome_screenshot(job_id, page, png, timeout=20):
+    # Headless Chrome spawns helper processes and can hang; run it in its own process group and kill the whole group on timeout,
+    # then remove its throwaway profile so nothing is left behind.
+    profile = f'/tmp/studio-chrome-{job_id}'
+    cmd = ['google-chrome', '--headless', '--no-sandbox', '--disable-gpu', '--hide-scrollbars', '--no-pdf-header-footer', '--window-size=720,960', f'--user-data-dir={profile}', f'--screenshot={png}', page.as_uri()]
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except FileNotFoundError:
+        return False
+    try:
+        p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)  # also reaps helper processes Chrome leaves behind after a normal exit
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            p.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+    return Path(png).is_file()
 
 
 def maybe_auto_retry(jid):

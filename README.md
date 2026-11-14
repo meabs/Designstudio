@@ -96,7 +96,7 @@ The full walkthrough is in the **[User guide](docs/USER_GUIDE.md)**.
 
 | Runner | Notes |
 |---|---|
-| **Template (fixture)** | Offline and deterministic. Applies tokens and simple colour directives. For demos, tests and trying the workflow. |
+| **Template (fixture)** | Offline and deterministic **sample output**: generic screens that use your screen names, show your brief as a lead paragraph, and apply your tokens and simple colour directives. It does not interpret the brief and says so on every screen. For tests and trying the workflow; use a coding agent for real design. |
 | **Claude Code, Codex** | Local CLIs through their existing authentication. Run inside a **bubblewrap filesystem sandbox** when available, with an environment allow-list. Each run has a timeout, automatic retry options and a full runner log. |
 
 Agent output is untrusted: it is limited to an allow-list of file types, validated against the [runner contract](docs/RUNNER_CONTRACT.md), and its self-report is shown but never presented as verified.
@@ -116,7 +116,7 @@ python3 apps/api/doctor.py claude --guidance --references --region --mix   # or:
 | Health | `GET /api/health`: uptime, workers, queue depth, job counts, free disk, sandbox availability. |
 | Logs | stderr and `storage/studio.log` (rotating). No prompts, request bodies or agent output are logged. |
 | Backup | `make backup` (online SQLite backup plus files, safe while running). Restore by pointing `STUDIO_STORAGE` at the backup. |
-| Configuration | `PORT`, `STUDIO_HOST`, `STUDIO_STORAGE`, `STUDIO_MAX_JOBS`, `STUDIO_SHARE_PORT`, `STUDIO_SHARE_HOST`, `STUDIO_ALLOWED_HOSTS`, `STUDIO_LOG_LEVEL`. |
+| Configuration | `PORT`, `STUDIO_HOST`, `STUDIO_STORAGE`, `STUDIO_MAX_JOBS`, `STUDIO_SHARE_PORT`, `STUDIO_SHARE_HOST`, `STUDIO_ALLOWED_HOSTS`, `STUDIO_FOLDER_ROOTS`, `STUDIO_LOG_LEVEL`. |
 | Share links | `STUDIO_SHARE_PORT=5180` serves read-only prototype links on a separate listener (loopback unless `STUDIO_SHARE_HOST` is set). |
 
 ## Security model
@@ -125,7 +125,9 @@ Design Studio is a **single-user local tool**, not a multi-user service.
 
 - Binds to `127.0.0.1` and rejects any `Host` that is not a loopback name (DNS-rebinding guard), because the studio can launch local agents. LAN mode is opt-in and widens this only to this computer's own address and `.local` name (plus `STUDIO_ALLOWED_HOSTS`).
 - JSON-only POSTs; unexpected errors return a request id and log details server-side.
-- Runner administration and reading arbitrary folders are allowed only from the computer running the studio.
+- Runner administration and folder reads are allowed only from the computer running the studio. Runners are never created from an executable supplied over the API: coding agents come only from the installed-agent scan, and template runners carry no command.
+- Folder reads (guideline import, review documents) are limited to an allowlist, your home folder by default (add more with `STUDIO_FOLDER_ROOTS`, separated by `:`). Symlinks are resolved first, hidden directories such as `.ssh` are refused, and only `.md`, `.json` and `.css` files are read.
+- Headless Chrome (screenshots) runs in its own process group and is killed, with its profile removed, if it hangs.
 - Agents run in a filesystem sandbox with an environment allow-list; generated screens are shown in sandboxed iframes.
 - Do not expose the port beyond your machine or a trusted network.
 
@@ -153,11 +155,11 @@ make check       # builds the UI (type-checks and bundles), then Python tests, U
 make ui-dev      # UI hot reload on :5174 (run `make run` for the API on :5173 first)
 ```
 
-Browser end-to-end (needs Node, Playwright and Chrome; uses a disposable store and fixture runners only):
+Browser end-to-end (needs Node, Playwright and Chrome; uses a disposable store and fixture runners only). `STUDIO_UNSAFE_TEST_RUNNERS=1` is for these tests only: it lets them register scripted fake agents, is off by default and is ignored in LAN mode:
 
 ```sh
 npm install --no-save @playwright/test
-STUDIO_STORAGE=$(mktemp -d) PORT=5199 python3 apps/api/server.py &
+STUDIO_UNSAFE_TEST_RUNNERS=1 STUDIO_FOLDER_ROOTS=/tmp STUDIO_STORAGE=$(mktemp -d) PORT=5199 python3 apps/api/server.py &
 STUDIO_URL=http://localhost:5199 node tests/browser.mjs   # core workflow
 STUDIO_URL=http://localhost:5199 node tests/tools.mjs     # designer tools
 ```
