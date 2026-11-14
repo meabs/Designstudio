@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 export function PlayerPage() {
   const { r, p, b } = useCurrent(); const data = useData(); const device = useUi((s) => s.device); const playerFile = useUi((s) => s.playerFile);
   const proto = data.prototype.find((x) => x.id === r.prototypeId); const frame = useRef<HTMLIFrameElement>(null);
+  useEffect(() => { ui.set({ device: b?.target === 'mobile' ? 'mobile' : 'desktop' }); }, [r.prototypeId, b?.id]);
   useEffect(() => {
     ui.set({ playerFile: '' });
     const onMsg = (e: MessageEvent) => { if (!frame.current || e.source !== frame.current.contentWindow || e.data?.type !== 'screen') return; ui.set({ playerFile: String(e.data.file || '').replace(/[^\w.\-]/g, '') }); };

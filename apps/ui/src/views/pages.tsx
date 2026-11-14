@@ -50,7 +50,7 @@ export function BoardsList() {
   const { r, boards } = useCurrent(); const data = useData();
   return (
     <>
-      <Heading title="Boards" sub="Each board is one journey: a brief, 2–5 screens, and the independent variations generated for it." right={<Button className="primary" data-action="new-board" onClick={() => runAction('new-board')}><Ic name="plus" /> New board</Button>} />
+      <Heading title="Boards" sub="Each board is one journey: a brief, 2–12 screens for a website, a mobile app or both, and the independent variations generated for it." right={<Button className="primary" data-action="new-board" onClick={() => runAction('new-board')}><Ic name="plus" /> New board</Button>} />
       <Content>
         {boards.length ? <div className="projects-grid grid grid-cols-[repeat(auto-fill,minmax(270px,1fr))] gap-4">{boards.map((b) => {
           const vs = variantsOf(b); const ap = vs.find((v) => v.approved); const jobs = data.job.filter((j) => j.board_id === b.id && activeJob(j)).length;

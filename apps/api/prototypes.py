@@ -225,6 +225,9 @@ def mix_variants(board_id, picks):
             thumb = src / 'thumbnails' / f'{sid}.png'
             if thumb.is_file():
                 shutil.copyfile(thumb, folder / 'thumbnails' / f'{sid}.png')
+            thumb_m = src / 'thumbnails' / f'{sid}-m.png'
+            if thumb_m.is_file():
+                shutil.copyfile(thumb_m, folder / 'thumbnails' / f'{sid}-m.png')
             changes.append(f"{entry['title']}: from {name_of(v)} v{v['version']}")
             provenance.append(dict(screen=sid, variant_id=v['id'], name=name_of(v), version=v['version']))
         first = sources[picks[ids[0]]]['manifest']

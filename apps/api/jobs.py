@@ -629,7 +629,11 @@ def _execute(j):
             (folder / 'thumbnails').mkdir(exist_ok=True)
             for s in manifest['screens']:
                 check_cancel(j)
-                chrome_screenshot(j['id'], safe_path(folder, s['file']), folder / 'thumbnails' / f'{s["id"]}.png')
+                from boards import frame_of
+
+                chrome_screenshot(j['id'], safe_path(folder, s['file']), folder / 'thumbnails' / f'{s["id"]}.png', size=frame_of(board, 'd'))
+                if board.get('target') == 'both':
+                    chrome_screenshot(j['id'], safe_path(folder, s['file']), folder / 'thumbnails' / f'{s["id"]}-m.png', size=frame_of(board, 'm'))
                 if not (folder / 'thumbnails' / f'{s["id"]}.png').is_file():
                     variant['validation'].append(
                         dict(
@@ -654,11 +658,11 @@ def _execute(j):
         event(j, 'failed', str(e))
 
 
-def chrome_screenshot(job_id, page, png, timeout=20):
+def chrome_screenshot(job_id, page, png, timeout=20, size=(720, 960)):
     # Headless Chrome spawns helper processes and can hang; run it in its own process group and kill the whole group on timeout,
     # then remove its throwaway profile so nothing is left behind.
     profile = f'/tmp/studio-chrome-{job_id}'
-    cmd = ['google-chrome', '--headless', '--no-sandbox', '--disable-gpu', '--hide-scrollbars', '--no-pdf-header-footer', '--window-size=720,960', f'--user-data-dir={profile}', f'--screenshot={png}', page.as_uri()]
+    cmd = ['google-chrome', '--headless', '--no-sandbox', '--disable-gpu', '--hide-scrollbars', '--no-pdf-header-footer', f'--window-size={size[0]},{size[1]}', f'--user-data-dir={profile}', f'--screenshot={png}', page.as_uri()]
     try:
         p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except FileNotFoundError:

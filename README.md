@@ -46,6 +46,7 @@ Design Studio puts that around the agents. Every run is a job with an **immutabl
 | **Audit on demand** | A manual audit runs accessibility checks (WCAG-referenced) plus checklists from **your own Markdown documents** (legal, design review). An optional agent reading of those documents is always labelled unverified. |
 | **Decide with a trail** | Approve or set aside with a reason, share the decision log as Markdown, and build an immutable, clickable prototype with a read-only share link. |
 | **Pull style back** | Extract colours, fonts and radii from a good variant straight into the guidelines. Add realistic empty, loading, error and long-content states to any version. |
+| **Websites and mobile apps** | Choose per board: a desktop website (1440 wide), a mobile app (390×844 phone) or one responsive design checked at both. Agents are briefed for the target, screenshots and pins follow it, and boards hold up to 12 screens. |
 | **Works on your phone** | Opt in to LAN mode and review from a phone on the same Wi-Fi. |
 
 ## Screenshots

@@ -42,3 +42,6 @@ The full build specification acceptance checklist has not been formally certifie
 
 - Template (fixture) runners produce generic sample screens: they show the brief as text but do not interpret it, so they prove the interface, not design quality. Judge the studio with a real coding agent on a real brief.
 - Folder reads are limited to `STUDIO_FOLDER_ROOTS` (default: your home folder). Anything else must be supplied with the browser file chooser.
+
+- Board targets shape the brief, the screenshot size and the checks; they do not make the output native. A mobile-app board is a phone-sized HTML mock-up: no native iOS or Android controls, gestures or real navigation stacks. A board is still a journey of up to 12 screens, not a whole site map or app.
+- On a "both" board only the two named widths are screenshotted (no tablet). Changed regions come from an HTML diff that doesn't depend on width and are drawn in whichever view you are reviewing; mixed versions carry both screenshots across.

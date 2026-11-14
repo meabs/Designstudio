@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Ic } from '@/components/app/icons';
 import { LivePreview, GenProfiles } from '@/tools';
+import { frameOf, MAX_SCREENS, TARGETS } from '@/lib/frame';
 import { cn } from '@/lib/utils';
 
 const parseLines = (t: string) => t.split('\n').map((x) => x.trim()).filter(Boolean);
@@ -34,10 +35,13 @@ export function projectMenu() {
   openDialog({ title: 'Project settings', submit: 'Save', body: <><Field label="Project name" htmlFor="pm-name"><Input id="pm-name" name="name" defaultValue={p.name} required /></Field><label className={checkRow}><input type="checkbox" name="archived" className="size-4" /> Archive project (hidden from the list; restorable)</label></>,
     onSubmit: async (f) => { await api('update-project', { id: p.id, name: f.get('name'), archived: !!f.get('archived') }); if (f.get('archived')) navigate('/projects'); } });
 }
+function TargetField({ id = 'nb-target' }: { id?: string }) {
+  return <Field label="What are you designing?" htmlFor={id}><select id={id} name="target" defaultValue="website" className={nativeSelect}>{Object.entries(TARGETS).map(([k, t]) => <option key={k} value={k}>{t.label}{k === 'website' ? ' · 1440 wide' : k === 'mobile' ? ' · 390 × 844 phone' : ' · responsive, checked at both widths'}</option>)}</select></Field>;
+}
 export function newBoard() {
   const { p, r } = getCurrent();
-  openDialog({ title: 'Create a screen board', submit: 'Create board', body: <><Field label="Board title" htmlFor="nb-title"><Input id="nb-title" name="title" required placeholder="Application Journey" /></Field><Field label="Design brief" htmlFor="nb-brief"><Textarea id="nb-brief" name="brief" required rows={3} /></Field><Field label="Screens · one per line, 2–5 screens" htmlFor="nb-screens"><Textarea id="nb-screens" name="screens" rows={4} defaultValue={'Eligibility\nYour details\nReview'} /></Field></>,
-    onSubmit: async (f) => { const screens = parseLines(String(f.get('screens'))); if (screens.length < 2 || screens.length > 5) throw Error('Choose 2–5 screens'); const x = await api('board', { project_id: p.id, title: f.get('title'), brief: f.get('brief'), screens }); await refresh(); navigate(boardPath(r, x)); } });
+  openDialog({ title: 'Create a screen board', submit: 'Create board', body: <><Field label="Board title" htmlFor="nb-title"><Input id="nb-title" name="title" required placeholder="Application Journey" /></Field><TargetField /><Field label="Design brief" htmlFor="nb-brief"><Textarea id="nb-brief" name="brief" required rows={3} /></Field><Field label={`Screens · one per line, 2–${MAX_SCREENS} screens`} htmlFor="nb-screens"><Textarea id="nb-screens" name="screens" rows={4} defaultValue={'Eligibility\nYour details\nReview'} /></Field></>,
+    onSubmit: async (f) => { const screens = parseLines(String(f.get('screens'))); if (screens.length < 2 || screens.length > MAX_SCREENS) throw Error(`Choose 2–${MAX_SCREENS} screens`); const x = await api('board', { project_id: p.id, target: f.get('target'), title: f.get('title'), brief: f.get('brief'), screens }); await refresh(); navigate(boardPath(r, x)); } });
 }
 
 /* ---------- generate (with per-run experiment overrides, conflict preview and estimate) ---------- */
@@ -146,14 +150,14 @@ export function handoff(researchId: string) {
       {boards.length > 0 && <><label className={checkRow}><input type="radio" name="dest" value="existing" className="size-4" /> Attach to an existing board (replaces its pinned findings; generate again to use them)</label><Field label="Existing board" htmlFor="h-board"><select id="h-board" name="board" className={nativeSelect}>{boards.map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}</select></Field></>}
       <div className="mb-1 mt-3 text-xs font-medium">Reference images (optional)</div><RefPicker selected={refIds} projectId={p.id} />
       <Field label="New board title" htmlFor="h-title"><Input id="h-title" name="title" defaultValue="Research-led journey" /></Field>
-      <Field label="Design brief" htmlFor="h-brief"><Textarea id="h-brief" name="brief" rows={3} defaultValue={handoffBrief(research.brief)} /></Field>
-      <Field label="Screens · one per line, 2–5 screens" htmlFor="h-screens"><Textarea id="h-screens" name="screens" rows={3} defaultValue={'Eligibility\nYour details\nReview'} /></Field>
+      <TargetField id="h-target" /><Field label="Design brief" htmlFor="h-brief"><Textarea id="h-brief" name="brief" rows={3} defaultValue={handoffBrief(research.brief)} /></Field>
+      <Field label={`Screens · one per line, 2–${MAX_SCREENS} screens`} htmlFor="h-screens"><Textarea id="h-screens" name="screens" rows={3} defaultValue={'Eligibility\nYour details\nReview'} /></Field>
       <div className="mb-1 text-xs font-medium">Compare agents · choose at least two configurations</div><RunnerChecklist /><div className="mt-3"><EstimateBox board={null} /></div>
     </>,
     onSubmit: async (f) => {
       if (f.get('dest') === 'existing') { const b = await api('board-research', { board_id: f.get('board'), research_id: research.id, finding_ids: findings.map((x: any) => x.id) }); await refresh(); navigate(boardPath(r, b)); toast('Findings attached. Generate variants to use them.'); return; }
-      const screens = parseLines(String(f.get('screens'))); if (screens.length < 2 || screens.length > 5) throw Error('Choose 2–5 screens'); if (f.getAll('runners').length < 2) throw Error('Select at least two runner configurations');
-      const result = await api('research-board', { project_id: p.id, research_id: research.id, finding_ids: findings.map((x: any) => x.id), title: f.get('title'), brief: f.get('brief'), screens, runner_ids: f.getAll('runners'), reference_ids: f.getAll('references'), idempotency_key: key });
+      const screens = parseLines(String(f.get('screens'))); if (screens.length < 2 || screens.length > MAX_SCREENS) throw Error(`Choose 2–${MAX_SCREENS} screens`); if (f.getAll('runners').length < 2) throw Error('Select at least two runner configurations');
+      const result = await api('research-board', { project_id: p.id, target: f.get('target'), research_id: research.id, finding_ids: findings.map((x: any) => x.id), title: f.get('title'), brief: f.get('brief'), screens, runner_ids: f.getAll('runners'), reference_ids: f.getAll('references'), idempotency_key: key });
       await refresh(); navigate(boardPath(r, result.board)); toast('Research carried forward. Screen generation started.');
     } });
 }
@@ -170,15 +174,15 @@ export function approveModal() {
     <Field label="Why this one? (optional, kept in the decision log)" htmlFor="ap-note"><Textarea id="ap-note" name="note" rows={2} placeholder="e.g. Clearest first step, calmest tone" /></Field></>,
   onSubmit: async (f) => { const res = await api('approve', { id: v.id, note: f.get('note') }); await refresh(); navigate(nav(r, 'prototypes') + '/' + res.prototype.id); toast('Approved and locked. Prototype built.'); } });
 }
-export async function pinModal(x: number, y: number) {
-  const { v, b } = getCurrent(); if (!v || !b) return; const screen = ui.get().screen; const el = await elementAt(v, screen, x, y);
+export async function pinModal(x: number, y: number, view: 'd' | 'm' = 'd') {
+  const { v, b } = getCurrent(); if (!v || !b) return; const screen = ui.get().screen; const fr = frameOf(b, view); const el = await elementAt(v, screen, x, y, fr);
   openDialog({ title: 'Add screen feedback', submit: 'Add comment', body: <>
     <p className="mb-2 text-xs text-muted-foreground">{b.screens[Number(screen)]} · <span id="pin-anchor">{el ? `anchored to element “${el}”` : 'no stable element here; using coordinates'}</span></p>
     <Field label="What should change?" htmlFor="pin-comment"><Textarea id="pin-comment" name="comment" rows={4} required autoFocus placeholder="Move the explanatory text below the heading." /></Field>
     <div className="grid grid-cols-2 gap-3"><Field label="Horizontal position %" htmlFor="pin-x"><Input id="pin-x" name="x" type="number" min={0} max={100} defaultValue={Math.round(x * 100)} /></Field><Field label="Vertical position %" htmlFor="pin-y"><Input id="pin-y" name="y" type="number" min={0} max={100} defaultValue={Math.round(y * 100)} /></Field></div></>,
   onSubmit: async (f) => {
     const nx = Number(f.get('x')) / 100; const ny = Number(f.get('y')) / 100; const moved = Math.abs(nx - x) > 0.006 || Math.abs(ny - y) > 0.006;
-    const created = await api('annotation', { variant_id: v.id, screen, x: nx, y: ny, comment: f.get('comment'), element_id: moved ? await elementAt(v, screen, nx, ny) : el });
+    const created = await api('annotation', { variant_id: v.id, screen, view, x: nx, y: ny, comment: f.get('comment'), element_id: moved ? await elementAt(v, screen, nx, ny, fr) : el });
     ui.set({ activePin: created.id, inspTab: 'comments' });
   } });
 }

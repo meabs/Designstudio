@@ -45,6 +45,23 @@ await step('profiles: create from Main, edit independently, default stays Main',
   await page.locator('[data-profile="main"]').click(); assert.doesNotMatch(await page.locator('#guidelines').inputValue(), /LOOSE/);
   await page.locator('[data-profile]', { hasText: 'Loose' }).click(); assert.match(await page.locator('#guidelines').inputValue(), /LOOSE PROFILE/);
 });
+await step('targets: a website-and-mobile board with 8 screens, phone inset, view-scoped pins', async () => {
+  await page.goto(`${origin}${base}/boards`); await page.locator('[data-action="new-board"]').first().click();
+  await page.locator('#nb-title').fill('Cabin booking'); await page.locator('#nb-target').selectOption('both'); await page.locator('#nb-brief').fill('Book a mountain cabin');
+  await page.locator('#nb-screens').fill(['Search', 'Results', 'Cabin', 'Dates', 'Guests', 'Extras', 'Pay', 'Confirmed'].join('\n')); await page.locator('#modal-form button[type=submit]').click();
+  const nb = await until(async () => (await api('state')).board.find(b => b.title === 'Cabin booking'), 'new board'); assert.equal(nb.target, 'both'); assert.equal(nb.screens.length, 8);
+  const fx = (await api('state')).runner.filter(r => r.type === 'fixture'); await api('generate', { project_id: project.id, board_id: nb.id, brief: nb.brief, runner_ids: fx.map(r => r.id), idempotency_key: 'tgt-' + Date.now() });
+  const v = await until(async () => (await api('state')).variant.find(x => x.board_id === nb.id), 'variant', 120000);
+  await page.goto(`${origin}${base}/boards/${nb.id}`); await page.locator('.phone-thumb').first().waitFor();
+  assert.match(await page.locator('.fsize').first().textContent(), /1440 × 900 · phone view inset/);
+  await page.goto(`${origin}${base}/boards/${nb.id}/review/${v.id}`); await page.locator('#pin-area img').waitFor();
+  const pin = async (view) => { const box = await page.locator('#pin-area img').boundingBox(); await page.locator('#pin-area').click({ position: { x: box.width * .5, y: box.height * .2 } }); await page.locator('#pin-comment').fill('pin on ' + view); await page.locator('#modal-form').getByRole('button', { name: 'Add comment' }).click(); await page.locator('.pin').first().waitFor(); };
+  await pin('desktop'); await page.locator('[data-review-view="m"]').click(); await page.waitForTimeout(500); assert.equal(await page.locator('.pin').count(), 0, 'desktop pin hidden on phone view');
+  const wPhone = (await page.locator('#pin-area').boundingBox()).width; await pin('phone');
+  const anns = (await api('state')).annotation.filter(a => a.variant_id === v.id); assert.deepEqual(anns.map(a => a.view).sort(), ['d', 'm']);
+  await page.locator('[data-review-view="d"]').click(); await page.waitForTimeout(500); assert.equal(await page.locator('.pin').count(), 1); assert.ok((await page.locator('#pin-area').boundingBox()).width > wPhone * 1.5, 'desktop frame wider than phone frame');
+  await page.goto(`${origin}${base}/boards/${nb.id}/review/${v.id}`); await page.getByRole('tab', { name: 'Design' }).click(); assert.match(await page.locator('.inspector').textContent(), /Width\s*1440/);
+});
 await step('settings: point the project at a folder of review documents', async () => {
   await page.goto(`${origin}${base}/settings/agents`); await page.locator('#review-folder').fill(docs); await page.locator('[data-action="save-review-folder"]').click();
   await page.getByText('legal.md').waitFor(); await page.getByText('3 criteria').waitFor();
@@ -69,7 +86,7 @@ await step('generate with Spread and Rules-vs-free creates four jobs with matchi
 });
 let freeVar, normVar;
 await step('free variant shows the rule-break log and a rules-vs-free compare', async () => {
-  st = await api('state'); const jobById = Object.fromEntries(st.job.map(j => [j.id, j])); const vs = st.variant.filter(v => !v.parent_id);
+  st = await api('state'); const jobById = Object.fromEntries(st.job.map(j => [j.id, j])); const vs = st.variant.filter(v => !v.parent_id && v.board_id === board.id);
   freeVar = vs.find(v => jobById[v.job_id].context.run_overrides?.free); normVar = vs.find(v => v.runner_id === freeVar.runner_id && !jobById[v.job_id].context.run_overrides?.free); assert.ok(freeVar.rule_breaks && !normVar.rule_breaks);
   await page.goto(`${origin}${base}/boards/${board.id}/review/${freeVar.id}`); await page.locator('#rule-breaks').waitFor();
   await page.locator('[data-action="compare-twin"]').first().click(); await page.waitForURL(/compare\?left=/); await page.getByText(/Free · fully open/).first().waitFor();
@@ -105,7 +122,7 @@ await step('set aside records why, history shows the decision log', async () => 
 });
 await step('approve records a reason too', async () => {
   await page.goto(`${origin}${base}/boards/${board.id}/review/${normVar.id}`); await page.locator('[data-action="approve"]').click(); await page.locator('#ap-note').fill('Clearest first step'); await page.locator('#modal-form button[type=submit]').click();
-  await until(async () => (await api('state')).board[0].decisions?.some(d => d.decision === 'approved' && d.note === 'Clearest first step'), 'approve decision');
+  await until(async () => (await api("state")).board.find(b => b.id === board.id).decisions?.some(d => d.decision === 'approved' && d.note === 'Clearest first step'), 'approve decision');
 });
 await step('live preview has phone/tablet/desktop widths', async () => {
   await page.goto(`${origin}${base}/boards/${board.id}`); await page.locator(`#frame-${normVar.id}-0`).dblclick();

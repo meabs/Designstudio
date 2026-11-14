@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Ic } from '@/components/app/icons';
 import { Tag, toast } from '@/components/app/feedback';
 import { runAction, openRef, pinEdit, pinDelete, acceptRevision, revertRevision, blindPick, OverrideList } from '@/actions';
+import { frameOf } from '@/lib/frame';
 import { ProfileTag, AuditTab, RuleBreaks, styleModal, statesModal, setAsideModal, twinLink } from '@/tools';
 import { refresh } from '@/lib/store';
 import { cn } from '@/lib/utils';
@@ -33,7 +34,7 @@ export function Inspector() {
 
   const design = <>
     <Block><div className="insp-layer mb-2 flex items-center gap-2.5"><Ic name="frame" size={14} /><div><strong className="text-sm">{screenTitle}</strong><div className="text-xs text-muted-foreground">{v.runner_name} · v{v.version}</div></div></div><Tag kind={kind}>{label}</Tag></Block>
-    <Block title="Frame"><Prop k="Width">720</Prop><Prop k="Height">960</Prop><Prop k="Version">v{v.version}</Prop>{profilesOf(data.project.find((x) => x.id === v.project_id)).length > 1 && !(b.blind && !b.revealed) && <Prop k="Profile">{profileOfVariant(v, data).name}</Prop>}<Prop k="Context"><span className="font-mono text-xs">v{ctxVersion(vctx)} · {fmtHash(vctx?.hash)}</span></Prop></Block>
+    <Block title="Frame"><Prop k="Width">{frameOf(b).w}</Prop><Prop k="Height">{frameOf(b).h}</Prop><Prop k="Version">v{v.version}</Prop>{profilesOf(data.project.find((x) => x.id === v.project_id)).length > 1 && !(b.blind && !b.revealed) && <Prop k="Profile">{profileOfVariant(v, data).name}</Prop>}<Prop k="Context"><span className="font-mono text-xs">v{ctxVersion(vctx)} · {fmtHash(vctx?.hash)}</span></Prop></Block>
     {colors.length > 0 && <Block title={`Fill · tokens${v.applied_tokens ? ' applied' : ''}`}>{colors.map(([k, val]) => <div key={k} className="fillrow flex h-7 items-center gap-2 text-[13px]"><span className="swatch size-3.5 rounded border" style={{ background: String(val) }} /><span>{k}</span><span className="ml-auto font-mono text-xs text-muted-foreground">{String(val).toUpperCase()}</span></div>)}</Block>}
     {(v.references || []).length > 0 && <Block title="Reference images"><div className="refstrip mb-2 flex flex-wrap gap-2">{v.references.map((x: any) => <button key={x.file} className="refthumb size-10 overflow-hidden rounded-md border p-0" data-ref-open={`${v.job_id}:${x.file}:${x.name}`} title={x.name + (x.note ? ' · ' + x.note : '')} onClick={() => openRef(`${v.job_id}:${x.file}:${x.name}`)}><img src={jobRefUrl(v.job_id, x)} alt={x.name} className="size-full object-cover" /></button>)}</div><p className="text-xs text-muted-foreground">Passed to the agent with the brief. Whether they were applied needs your review.</p></Block>}
     {ro && <Block title="Run-only experiment overrides"><p className="mb-1.5 text-xs text-muted-foreground">Applied to this run only. Not part of the project guidelines.</p>{ro.free && <p className="mb-1.5 text-xs font-medium">Free exploration · {ro.free === 'open' ? 'fully open, no guidelines or rules' : 'rules and checks off, guidelines as inspiration'}</p>}{ro.prose && <p className="text-xs">{ro.prose}</p>}{!ro.free && <OverrideList overrides={job.context.overrides.filter((o: any) => ro.rules.some((x: any) => x.id === o.id) || ro.suspend.includes(o.id))} />}</Block>}

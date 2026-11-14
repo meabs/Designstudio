@@ -189,7 +189,7 @@ export function ReviewDocsPanel() {
 /* ---------- responsive preview ---------- */
 const WIDTHS: [string, number | null][] = [['Phone', 390], ['Tablet', 768], ['Desktop', null]];
 export function LivePreview({ v, sid }: { v: any; sid: string }) {
-  const [w, setW] = useState<number | null>(null); const url = live(v, sid);
+  const target = getData().board.find((x: any) => x.id === v.board_id)?.target; const [w, setW] = useState<number | null>(target === 'mobile' ? 390 : null); const url = live(v, sid);
   return <>
     <div className="mb-2 flex items-center gap-1.5" role="group" aria-label="Preview width">{WIDTHS.map(([l, x]) => <Button key={l} size="xs" variant={w === x ? 'default' : 'outline'} aria-pressed={w === x} data-preview-width={l.toLowerCase()} onClick={() => setW(x)}>{l}{x ? ` ${x}` : ''}</Button>)}</div>
     <div className="flex justify-center rounded-md bg-muted/40 p-0"><iframe className="live-frame h-[64vh] rounded-md border bg-white max-sm:h-[calc(100dvh-11rem)]" style={{ width: w ? Math.min(w, 2000) : '100%', maxWidth: '100%' }} title="Live preview of generated screen" sandbox="allow-scripts allow-forms" src={url} /></div>

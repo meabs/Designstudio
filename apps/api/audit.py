@@ -229,7 +229,7 @@ def snippet(tag, a):
     return f'<{tag}{bits}>'
 
 
-def audit_screen(raw, tokens):
+def audit_screen(raw, tokens, phone=False):
     p = Page()
     p.feed(raw)
     vars_ = {'--' + k: str(v) for k, v in (tokens or {}).items()}
@@ -292,8 +292,9 @@ def audit_screen(raw, tokens):
                 small.append(f'{snippet(tag, a)} {m.group(1)}px')
     add('accessibility', 'Text is not smaller than 12px', 'review' if small else 'pass', ('Small text: ' + '; '.join(small[:5])) if small else 'No font-size under 12px declared.')
     add('accessibility', 'Tap targets, 44px recommended', 'fail' if undersized else 'not_assessable', ('Declared smaller than 44px: ' + '; '.join(undersized[:4])) if undersized else 'No explicit sizes under 44px; rendered size from padding is not measured by this static check.')
-    wide = [f'{s[:30]} {k} {v}' for s, pr in rules for k, v in pr.items() if k in ('width', 'min-width') and (px(v) or 0) > 480]
-    add('accessibility', 'No fixed width that overflows a phone (WCAG 1.4.10)', 'review' if wide else 'pass', ('Fixed widths above 480px: ' + '; '.join(wide[:4])) if wide else 'No fixed widths over 480px declared.')
+    limit = 390 if phone else 480
+    wide = [f'{s[:30]} {k} {v}' for s, pr in rules for k, v in pr.items() if k in ('width', 'min-width') and (px(v) or 0) > limit]
+    add('accessibility', 'No fixed width that overflows a phone (WCAG 1.4.10)', ('fail' if phone else 'review') if wide else 'pass', (f'Fixed widths above {limit}px: ' + '; '.join(wide[:4])) if wide else f'No fixed widths over {limit}px declared.')
     return res, ' '.join(p.text), p
 
 
@@ -313,7 +314,7 @@ def audit_variant(variant_id):
     for s in manifest.get('screens', []):
         f = safe_path(folder, s['file'])
         raw = f.read_text(errors='replace')
-        res, text, _ = audit_screen(raw, tokens)
+        res, text, _ = audit_screen(raw, tokens, phone=(get(v['board_id']).get('target') in ('mobile', 'both')))
         texts[s['id']] = (s['title'], text)
         for r in res:
             findings.append(dict(r, screen=s['id'], screen_title=s['title'], source=''))

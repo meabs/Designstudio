@@ -116,4 +116,43 @@ class DesignToolsTest(unittest.TestCase):
   with self.assertRaises(ValueError): s.launch_doc_review(v['id'],self.r[0])
   (self.docs/'only.md').write_text('# Legal\n- [ ] Must include "Representative APR"\n'); p=s.get(self.p['id']); p['review_folder']=str(self.docs); s.save('project',p)
   with patch('jobs.enqueue'),self.assertRaises(ValueError): s.launch_doc_review(v['id'],self.r[0])
+ # board targets
+ def board_for(self,target=None,n=3):
+  d=dict(project_id=self.p['id'],title='T',brief='A cabin booking site',screens=[f'Screen {i}' for i in range(n)]); 
+  if target: d['target']=target
+  return s.create_board(d)
+ def test_target_defaults_validates_and_sets_frames(self):
+  self.assertEqual(self.board_for()['target'],'website')
+  for t,fr in (('website',(1440,900)),('mobile',(390,844)),('both',(1440,900))): self.assertEqual(boards.frame_of(self.board_for(t),'d'),fr)
+  self.assertEqual(boards.frame_of(self.board_for('both'),'m'),(390,844)); self.assertEqual(boards.frame_of({'id':'legacy'}),(720,960))
+  with self.assertRaises(ValueError): self.board_for('watch')
+ def test_screen_limit_is_twelve(self):
+  self.assertEqual(len(self.board_for('mobile',12)['screens']),12)
+  for n in (1,13):
+   with self.assertRaises(ValueError): self.board_for('mobile',n)
+ def test_instruction_carries_the_target_and_legacy_boards_do_not(self):
+  for t,needle in (('website','1440px'),('mobile','390px'),('both','AND as a mobile app')):
+   b=self.board_for(t)
+   with patch.object(boards,'enqueue'): j=s.launch(dict(board_id=b['id'],brief='b',runner_ids=self.r[:2]),'generate_board',self.p['id'])[0]
+   self.assertIn('TARGET:',j['instruction']); self.assertIn(needle,j['instruction'])
+  legacy=self.board_for(); legacy.pop('target'); s.save('board',legacy)
+  with patch.object(boards,'enqueue'): j=s.launch(dict(board_id=legacy['id'],brief='b',runner_ids=self.r[:2]),'generate_board',self.p['id'])[0]
+  self.assertNotIn('TARGET:',j['instruction'])
+ def test_screenshots_match_the_target_and_both_gets_a_phone_view(self):
+  import struct
+  def size(p): d=p.read_bytes(); return struct.unpack('>II',d[16:24])
+  for t,want in (('website',{'0':(1440,900)}),('mobile',{'0':(390,844)}),('both',{'0':(1440,900),'0-m':(390,844)})):
+   b=self.board_for(t,2)
+   with patch.object(boards,'enqueue'): j=s.launch(dict(board_id=b['id'],brief='b',runner_ids=self.r[:2]),'generate_board',self.p['id'])[0]
+   with patch.object(s.time,'sleep'): s.execute(j)
+   v=s.get(s.get(j['id'])['variant_id']); th=s.STORE/'variants'/v['id']/'thumbnails'
+   for name,dims in want.items():
+    if (th/f'{name}.png').is_file(): self.assertEqual(size(th/f'{name}.png'),dims,(t,name))
+    else: self.skipTest('Chrome unavailable')
+   self.assertEqual((th/'0-m.png').is_file(),t=='both')
+ def test_mobile_audit_treats_fixed_wide_layouts_as_failures(self):
+  html='<html lang="en"><head><title>t</title><meta name="viewport" content="width=device-width"><style>.card{width:600px}</style></head><body><h1>x</h1></body></html>'
+  def out(phone): return {r['check']:r['outcome'] for r in audit.audit_screen(html,{},phone=phone)[0]}['No fixed width that overflows a phone (WCAG 1.4.10)']
+  self.assertEqual(out(False),'review'); self.assertEqual(out(True),'fail')
+  self.assertEqual({r['check']:r['outcome'] for r in audit.audit_screen(html.replace('600px','380px'),{},phone=True)[0]}['No fixed width that overflows a phone (WCAG 1.4.10)'],'pass')
 if __name__=='__main__': unittest.main()

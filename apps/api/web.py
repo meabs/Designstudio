@@ -411,6 +411,7 @@ class Handler(SimpleHTTPRequestHandler):
                         status='open',
                         selected=True,
                         element_id=d.get('element_id') or None,
+                        view=d.get('view') if d.get('view') in ('d', 'm') else 'd',
                     ),
                 )
             elif action == 'reference-upload':

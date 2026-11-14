@@ -104,3 +104,14 @@ A **profile** is a complete, separately versioned set of guidelines: text, rules
 - **Switch** the profile you are editing (save or discard first), **Rename**, **Make default**, or **Delete** a non-default profile.
 
 The **default** profile is what new runs, research, the conflict preview and the sidebar counts use. In **Generate**, tick one or more profiles; each ticked profile runs every agent with the same brief, references and (if Spread is on) directions, so the results are comparable. It can be combined with *Rules vs free*. Variants, the inspector, Compare and History show which profile each came from. A revision keeps its parent's profile (falling back to the default if that profile was deleted), "Pull style" saves into the variant's profile, and a free run's rule-break log checks against its own profile. Deleting a profile never touches variants already made; they keep their snapshot.
+
+
+## Websites, mobile apps, or both
+
+When you create a board (or turn research into one) choose **what you are designing**:
+
+- **Website:** screens are designed and screenshotted at 1440×900.
+- **Mobile app:** screens are designed for a 390×844 phone (viewport meta, 44px touch targets, no horizontal scroll, app-style navigation), screenshotted at that size, and the prototype player opens in the phone view. The audit treats a fixed width over 390px as a failure instead of a note.
+- **Both:** one responsive design checked at both widths. Each screen is screenshotted twice; board cards show the desktop screen with a phone inset, and **Review** has a **Desktop | Phone** switch. Pins belong to the view they were placed in, so a phone pin never shows on the desktop layout.
+
+The chosen target is passed to every agent in the task text. Boards can have **2 to 12 screens**. Boards created before this feature keep the original 720×960 frame.

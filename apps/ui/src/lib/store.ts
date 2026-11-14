@@ -45,7 +45,7 @@ export const ui = createStore({
   screen: '0', selectedVariant: '', device: (typeof matchMedia === 'function' && matchMedia('(max-width:767px)').matches ? 'mobile' : 'desktop') as 'desktop' | 'mobile', zoom: 100,
   showReverted: false, showBefore: false, activePin: '', inspTab: 'design' as 'design' | 'checks' | 'comments' | 'audit', tool: 'comment' as 'comment' | 'move',
   regionOnly: true, showRegions: true, histFilter: 'all', roundState: {} as Record<string, boolean>, fitPending: true, scrollTo: '',
-  draft: null as Draft | null, draftFor: '', viewProfile: '', genProfile: '', busy: false, playerFile: '' as string,
+  draft: null as Draft | null, draftFor: '', viewProfile: '', genProfile: '', reviewView: 'd' as 'd' | 'm', busy: false, playerFile: '' as string,
 });
 export const useUi = <R,>(sel: (s: ReturnType<typeof ui.get>) => R) => useSel(ui, sel);
 
@@ -65,7 +65,7 @@ export const profileOfVariant = (v: any, data: Data = getData()) => { const c = 
 export const prototypeOf = (v: any) => getData().prototype.filter((p) => p.variant_id === v?.id).sort((a, b) => b.created_at - a.created_at)[0];
 export const refUrl = (r: any) => `/assets/projects/${r.project_id}/references/${r.file}`;
 export const jobRefUrl = (jobId: string, r: any) => `/assets/jobs/${jobId}/references/${r.file}`;
-export const img = (v: any, s: string) => `/assets/variants/${v.id}/thumbnails/${s}.png`;
+export const img = (v: any, s: string, view: string = 'd') => `/assets/variants/${v.id}/thumbnails/${s}${view === 'm' ? '-m' : ''}.png`;
 export const live = (v: any, s: string) => `/assets/variants/${v.id}/screens/${s}.html`;
 export const protoLive = (p: any, s: string) => `/assets/prototypes/${p.id}/screens/${s}.html`;
 export const checksOf = (v: any) => (v?.validation || []).map((x: any, i: number) => ({ ...x, index: i, review: v.reviews?.[i] }));
