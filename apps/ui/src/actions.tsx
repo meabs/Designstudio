@@ -1,6 +1,7 @@
 // Dialogs and imperative actions (ported from the old app.js action()/modal code).
 import { useEffect, useRef, useState } from 'react';
 import { useData, useUi, profileCtx, profilesOf, api, refresh, getData, ui, runnerOf, enabledRunners, img, live, jobRefUrl, checksOf, unresolvedReviews, prototypeOf, protoLive, dataStore, isDirty, ctxVersion, rescanAgents, referencesOf, ensureDraft } from '@/lib/store';
+import { askRunner } from '@/assist';
 import { navigate, getCurrent, nav, boardPath, parseRoute, useCurrent } from '@/lib/router';
 import { uuid, fmtHash, esc } from '@/lib/format';
 import { findingsForHandoff, handoffBrief, parseSources, boardResearch, researchJobs } from '@/lib/research';
@@ -119,7 +120,7 @@ export function generateModal() {
       </details>
       <div className="mb-3 rounded-md border bg-background p-2.5" id="explore-options">
         <div className="mb-1 text-xs font-medium">Explore</div>
-        <label className={checkRow}><input type="checkbox" name="spread" className="size-4" /> Spread: give each agent a different direction (calm, bold, dense, warm…)</label>
+        <label className={checkRow}><input type="checkbox" name="spread" defaultChecked className="size-4" /> Spread: give each agent a different direction (calm, bold, dense, warm…) <span className="text-xs text-muted-foreground">(on by default so designs differ; untick for a strict like-for-like comparison)</span></label>
         {!b.blind && <label className={checkRow}><input type="checkbox" name="pair" className="size-4" /> Rules vs free: also run a free version of each, to compare side by side <span className="text-xs text-muted-foreground">(doubles the runs)</span></label>}
       </div>
       <div className="mb-1 text-xs font-medium">Reference images (optional)</div><RefPicker selected={b.reference_ids || []} projectId={ctx.project_id} />
@@ -178,9 +179,11 @@ export async function pinModal(x: number, y: number, view: 'd' | 'm' = 'd') {
   const { v, b } = getCurrent(); if (!v || !b) return; const screen = ui.get().screen; const fr = frameOf(b, view); const el = await elementAt(v, screen, x, y, fr);
   openDialog({ title: 'Add screen feedback', submit: 'Add comment', body: <>
     <p className="mb-2 text-xs text-muted-foreground">{b.screens[Number(screen)]} · <span id="pin-anchor">{el ? `anchored to element “${el}”` : 'no stable element here; using coordinates'}</span></p>
-    <Field label="What should change?" htmlFor="pin-comment"><Textarea id="pin-comment" name="comment" rows={4} required autoFocus placeholder="Move the explanatory text below the heading." /></Field>
+    {askRunner(v) && <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1" id="pin-mode"><label className={checkRow}><input type="radio" name="mode" value="change" defaultChecked className="size-4" /> Ask for a change</label><label className={checkRow}><input type="radio" name="mode" value="ask" className="size-4" /> Ask the agent a question (nothing is changed)</label></div>}
+    <Field label="What should change? (or your question)" htmlFor="pin-comment"><Textarea id="pin-comment" name="comment" rows={4} required autoFocus placeholder="Move the explanatory text below the heading." /></Field>
     <div className="grid grid-cols-2 gap-3"><Field label="Horizontal position %" htmlFor="pin-x"><Input id="pin-x" name="x" type="number" min={0} max={100} defaultValue={Math.round(x * 100)} /></Field><Field label="Vertical position %" htmlFor="pin-y"><Input id="pin-y" name="y" type="number" min={0} max={100} defaultValue={Math.round(y * 100)} /></Field></div></>,
   onSubmit: async (f) => {
+    if (f.get('mode') === 'ask') { await api('ask-pin', { variant_id: v.id, screen, element_id: el || '', question: f.get('comment'), runner_id: askRunner(v).id }); ui.set({ inspTab: 'comments' }); toast('Question sent. The answer appears under Comments.'); return; }
     const nx = Number(f.get('x')) / 100; const ny = Number(f.get('y')) / 100; const moved = Math.abs(nx - x) > 0.006 || Math.abs(ny - y) > 0.006;
     const created = await api('annotation', { variant_id: v.id, screen, view, x: nx, y: ny, comment: f.get('comment'), element_id: moved ? await elementAt(v, screen, nx, ny, fr) : el });
     ui.set({ activePin: created.id, inspTab: 'comments' });

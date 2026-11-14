@@ -10,6 +10,7 @@ import { runAction, openRef, pinEdit, pinDelete, acceptRevision, revertRevision,
 import { frameOf } from '@/lib/frame';
 import { ProfileTag, AuditTab, RuleBreaks, styleModal, statesModal, setAsideModal, twinLink } from '@/tools';
 import { refresh } from '@/lib/store';
+import { mergeModal, CutOff, AskList } from '@/assist';
 import { cn } from '@/lib/utils';
 
 const OUTCOME: Record<string, string> = { pass: 'Passed deterministic checks', fail: 'Failed deterministic checks', not_assessable: 'Not assessable (missing instrumentation)', review: 'Needs designer review' };
@@ -43,6 +44,7 @@ export function Inspector() {
       {rep.viewed_references === false ? <p className="text-xs"><strong>Says it did not view the reference images.</strong></p> : rep.viewed_references === true ? <p className="text-xs">Says it viewed the reference images.</p> : null}
       {rep.ignored.length > 0 && <><p className="group-label mt-2 text-xs font-medium">Says it did not follow</p>{rep.ignored.map((l: string, i: number) => <p key={i} className="text-xs">{l}</p>)}</>}
       <details><summary className="cursor-pointer text-xs">Closing message</summary><pre className="whitespace-pre-wrap text-xs">{rep.text}</pre></details></Block>}
+    {v.cut_off && <Block><CutOff v={v} full /></Block>}
     <Block title="Lineage">
       {(v.mix_sources || []).length > 0 && <><p className="mb-2 text-xs text-muted-foreground">Mixed from:</p>{v.mix_sources.map((m: any, i: number) => <Prop key={i} k={b.screens[Number(m.screen)]}>{m.name} v{m.version}</Prop>)}</>}
       {parent ? <Button size="xs" variant="outline" data-parent={parent.id} onClick={() => { ui.set({ selectedVariant: parent.id }); if (r.mode === 'review') navigate(boardPath(r, b, 'review', parent.id), { keepView: true }); }}><Ic name="back" size={12} /> View parent v{parent.version}</Button> : <p className="text-xs text-muted-foreground">{v.kind === 'mix' ? 'Composed from existing versions.' : 'Original generation.'}</p>}
@@ -53,6 +55,7 @@ export function Inspector() {
       {twin && <Button size="sm" variant="outline" data-action="compare-twin" onClick={() => navigate(boardPath(r, b, 'compare') + `?left=${twin.left}&right=${twin.right}`)}><Ic name="columns" size={13} /> Compare rules vs free</Button>}
       <Button size="sm" variant="outline" data-action="pull-style" onClick={() => styleModal(v)}><Ic name="tokens" size={13} /> Pull style into guidelines</Button>
       <Button size="sm" variant="outline" data-action="add-states" onClick={() => statesModal(v)}><Ic name="layers" size={13} /> Add realistic states</Button>
+      <Button size="sm" variant="outline" data-action="merge-part" onClick={() => mergeModal(v)}><Ic name="columns" size={13} /> Bring a part from another design…</Button>
       {!v.approved && <Button size="sm" variant="outline" data-action="set-aside" onClick={() => setAsideModal(v)}><Ic name="minus" size={13} /> Set aside…</Button>}</div></Block>}
     {v.changes.length > 0 && <Block title="Changes in this version">{v.changes.map((c: string, i: number) => <p key={i} className="text-[13px]">{c}</p>)}</Block>}
   </>;
@@ -70,6 +73,7 @@ export function Inspector() {
       ))}
       {!annotations.length && <p className="text-xs text-muted-foreground">No comments yet. Open Review, pick the comment tool and click a screen.</p>}
       <Button size="xs" variant="outline" data-action="review" onClick={() => runAction('review')}><Ic name="plus" size={12} /> Add comment</Button>
+      <AskList v={v} />
     </Block>
   );
   const anchored = chosen.filter((a) => a.element_id).length;

@@ -17,7 +17,7 @@ class HandoffTest(unittest.TestCase):
  def test_every_runner_receives_board_findings_and_sources(self):
   b=self.board()
   with patch.object(s.threading,'Thread'):
-   jobs=s.launch(dict(board_id=b['id'],brief=b['brief'],runner_ids=[r['id'] for r in s.allof('runner')]),'generate_board',self.p['id'])
+   jobs=s.launch(dict(board_id=b['id'],brief=b['brief'],runner_ids=[r['id'] for r in s.allof('runner')],spread=False),'generate_board',self.p['id'])
   self.assertEqual(len(jobs),2);self.assertEqual(jobs[0]['input_hash'],jobs[1]['input_hash'])
   for j in jobs:
    self.assertEqual([f['id'] for f in j['findings']],['first'])

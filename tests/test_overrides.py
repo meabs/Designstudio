@@ -17,7 +17,7 @@ class OverrideTest(unittest.TestCase):
   c=jobs[0]['context']; self.assertEqual(next(r for r in c['effective_rules'] if r['id']=='CTA-001')['description'],'Up to three equal actions'); self.assertNotEqual(c['hash'],before['hash'])
   self.assertTrue(any(o['id']=='CTA-001' for o in c['overrides']))
  def test_prose_in_instruction_and_shared_hash_for_all_runners(self):
-  jobs=self.launch(overrides=dict(prose='EXPERIMENT: three doors'))
+  jobs=self.launch(overrides=dict(prose='EXPERIMENT: three doors'),spread=False)
   for j in jobs: self.assertIn('RUN-ONLY EXPERIMENT BRIEF',j['instruction']); self.assertIn('EXPERIMENT: three doors',j['instruction']); self.assertIn('TAKES PRECEDENCE',j['instruction'])
   self.assertEqual(len({j['input_hash'] for j in jobs}),1)
   plain=self.launch(); self.assertNotEqual(plain[0]['input_hash'],jobs[0]['input_hash']); self.assertNotIn('RUN-ONLY',plain[0]['instruction'])

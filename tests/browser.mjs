@@ -78,7 +78,7 @@ await step('two variants generate without credentials; screenshots render; no po
 await step('references reach every agent job, its task text, and the variant inspector', async () => {
   const st = await api('state'), jobs = st.job.filter(j => j.board_id === board.id && j.type === 'generate_board'); assert.equal(jobs.length, 2);
   for (const j of jobs) { assert.equal(j.references.length, 2); const task = await (await fetch(`${origin}/assets/jobs/${j.id}/TASK.md`)).text(); assert.match(task, /Reference images/); assert.match(task, new RegExp('references/' + j.references[0].file.replace('.', '\\.'))); const img = await fetch(`${origin}/assets/jobs/${j.id}/references/${j.references[0].file}`); assert.equal(img.status, 200); assert.equal(img.headers.get('content-type'), 'image/png'); }
-  assert.equal(jobs[0].input_hash, jobs[1].input_hash, 'identical shared input incl. references');
+  assert.deepEqual(jobs[0].references, jobs[1].references, 'identical references'); assert.equal(jobs[0].context.hash, jobs[1].context.hash, 'identical guidelines snapshot'); assert.notEqual(jobs[0].angle, jobs[1].angle, 'spread gives each agent its own direction by default');
   const v = st.variant.find(x => x.board_id === board.id && x.style === 'b'); assert.equal(v.references.length, 2); assert.ok(v.validation.some(x => /Reference images/.test(x.check) && x.outcome === 'review'));
   await page.goto(`${origin}/projects/${project.id}/boards/${board.id}`); await page.locator('.fframe').first().click(); await page.locator('.refthumb').first().click(); await page.locator('#dialog img.lightbox').waitFor(); await page.locator('#close-dialog').click();
 });
@@ -218,6 +218,7 @@ await step('per-job experiment overrides: conflict preview, run-only prose, noth
   await page.locator('select[name="mode:CTA-001"]').selectOption('replace'); await page.locator('input[name="text:CTA-001"]').fill('Up to three equal actions on the entry screen');
   await page.waitForFunction(() => ![...document.querySelectorAll('#conflicts .conflict.warn')].some(e => e.textContent.includes('CTA-001')), null, { timeout: 5000 }); // replacing the rule resolves the warning
   const fx = (await api('state')).runner.filter(r => r.type === 'fixture'); for (const r of fx) { const cb = page.locator(`input[name="runners"][value="${r.id}"]`); if (!(await cb.isChecked())) await cb.check(); }
+  await page.locator('input[name="spread"]').uncheck(); // a strict like-for-like experiment: every runner gets the identical input
   await page.locator('#modal-form button.primary').click(); await page.locator('#dialog').waitFor({ state: 'hidden' });
   const st = await api('state'); const jobs = st.job.filter(j => j.board_id === board.id && j.context?.run_overrides?.prose); assert.ok(jobs.length >= 2);
   for (const j of jobs) { assert.match(j.instruction, /RUN-ONLY EXPERIMENT BRIEF/); assert.equal(j.context.effective_rules.find(r => r.id === 'CTA-001').description, 'Up to three equal actions on the entry screen'); }

@@ -38,6 +38,7 @@ Design Studio puts that around the agents. Every run is a job with an **immutabl
 | | |
 |---|---|
 | **Independent variants** | One brief goes to several agents (Claude Code, Codex, or built-in template runners). Each gets the same inputs and snapshot and cannot see the others. Optional blind A/B hides which agent made what. |
+| **Faster to a result** | Spread is on by default so agents differ; draft guidelines from a short description; bring one part of another design into yours; ask a question about a pin without changing anything; a run that times out after finishing is kept as **Cut off**; a **developer hand-off** zip (site plus guidelines, tokens, rules). |
 | **Experiment freely** | **Spread** gives each agent a different direction. **Free exploration** drops the rules and checks for a run. **Rules vs free** runs everything twice for a side-by-side, and a **rule-break log** shows what the rules would have said. |
 | **Guideline profiles** | Keep several named, separately versioned sets of `DESIGN.md`, rules and tokens per project, and run every agent under each to compare. |
 | **Bring your own files** | Import `DESIGN.md`, rules files and token files (JSON or CSS variables) from a folder or the browser. Review the draft, then save a version. No pasting. |

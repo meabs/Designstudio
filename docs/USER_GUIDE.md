@@ -64,7 +64,7 @@ Add local coding-agent configurations (model optional), rename, enable/disable, 
 
 **Free exploration.** In *Generate → Experiment for this run only*, choose *Loosen* (no rules or checks; the guidelines are inspiration only) or *Fully open* (no guidelines, tokens or rules; the brief leads). Nothing is saved to the project, and each variant records how it was made.
 
-**Spread.** Tick *Spread* in the generate dialog and each agent gets a different directed angle (calm, bold, dense, warm, editorial, playful). Each new spread round rotates the angles.
+**Spread.** *Spread* is on by default whenever you generate with more than one agent, so each gets a different directed angle (calm, bold, dense, warm, editorial, playful) and the results actually differ. Untick it for a strict like-for-like comparison where every agent gets the identical input. Each new spread round rotates the angles.
 
 **Rules vs free.** Tick *Rules vs free* to run every agent twice with the same brief and angle, once as configured and once with the rules off. Open either in the inspector and press *Compare rules vs free*. Not available on blind boards (it would reveal which is which).
 
@@ -115,3 +115,17 @@ When you create a board (or turn research into one) choose **what you are design
 - **Both:** one responsive design checked at both widths. Each screen is screenshotted twice; board cards show the desktop screen with a phone inset, and **Review** has a **Desktop | Phone** switch. Pins belong to the view they were placed in, so a phone pin never shows on the desktop layout.
 
 The chosen target is passed to every agent in the task text. Boards can have **2 to 12 screens**. Boards created before this feature keep the original 720×960 frame.
+
+## Working faster with the winner
+
+**Starter-guidelines warning.** A new project starts with sample guidelines (“neutral financial-services”, a grey-green palette). While they are unchanged the Guidelines page shows a warning, because every agent is told the same thing and designs converge.
+
+**Draft guidelines from a description.** On the Guidelines page, describe the company, audience and feel in a few sentences and pick an agent (Claude Code or Codex). It returns a draft DESIGN.md, tokens and rules, plus the assumptions it made. Nothing is saved: *Replace my draft with this* loads it into your unsaved draft, and it becomes a version only when you press Save new version.
+
+**Bring a part from another design.** In the inspector's *Explore* block, *Bring a part from another design…* asks an agent to rebuild one part (for example "the hero" or "the audit log") from a different design on the same board into the one you are looking at, using this design's own styling. It becomes a new revision of the design you started from; the donor is only read. Not available on a blind board, because it would reveal which design is which.
+
+**Ask about a spot instead of changing it.** When you add a pin, choose *Ask the agent a question*. The agent reads the HTML and CSS and answers under **Comments → Questions**, labelled as an unverified agent opinion. Nothing is changed.
+
+**Cut-off runs are kept.** If an agent runs out of time after writing every screen and the manifest, the work is kept and marked **Cut off** instead of being thrown away. Review it and use Revise to finish any polish. If the screens or manifest are missing, the run still counts as timed out.
+
+**Developer hand-off.** In the player, *Developer hand-off* downloads a clean zip: `site/` (static HTML, CSS and JS, open `index.html`), `design/` (the guidelines, `tokens.json`, `tokens.css` and `rules.json` it was built to) and a README. It does not name the agent, and it states that the automated checks are structural, not a compliance certification. (*Export ZIP* is still there for the raw prototype folder.)

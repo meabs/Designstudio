@@ -35,6 +35,7 @@ export function PlayerPage() {
           <Button variant="outline" size="sm" render={<a target="_blank" rel="noopener" href={protoLive(proto, start.id)} />}><Ic name="external" size={13} /> New tab</Button>
           <Button variant="outline" size="sm" data-action="share" onClick={shareModal}><Ic name="link" size={13} /> Share</Button>
           <Button variant="outline" size="sm" render={<a href={`/api/export/${proto.id}`} />}><Ic name="download" size={13} /> Export ZIP</Button>
+          <Button variant="outline" size="sm" data-action="handoff" title="Clean site folder plus guidelines, tokens and rules" render={<a href={`/api/handoff/${proto.id}`} />}><Ic name="download" size={13} /> Developer hand-off</Button>
           <Button variant="ghost" size="sm" data-action="exit-player" onClick={() => navigate(board ? boardPath(r, board) : nav(r, 'boards'))}>Close</Button>
         </div>
       </header>

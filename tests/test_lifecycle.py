@@ -89,7 +89,7 @@ class LifecycleTest(unittest.TestCase):
   self.assertNotIn('/',self.upload(name='../../etc/passwd.png')['name'])
  def test_references_reach_job_envelope_instruction_and_snapshot(self):
   r=self.upload(); rec=s.get(r['id']); rec['note']='Use this card layout'; s.save('reference',rec)
-  with patch.object(s.threading,'Thread'): jobs=s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=[x['id'] for x in s.allof('runner')[:2]],reference_ids=[r['id']]),'generate_board',self.p['id'])
+  with patch.object(s.threading,'Thread'): jobs=s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=[x['id'] for x in s.allof('runner')[:2]],reference_ids=[r['id']],spread=False),'generate_board',self.p['id'])
   for j in jobs:
    self.assertEqual(j['references'][0]['sha256'],r['sha256']); self.assertIn('references/'+r['file'],j['instruction']); self.assertIn('Use this card layout',j['instruction']); self.assertTrue((s.STORE/'jobs'/j['id']/'references'/r['file']).is_file())
   self.assertEqual(jobs[0]['input_hash'],jobs[1]['input_hash']); self.assertEqual(s.get(self.b['id'])['reference_ids'],[r['id']])

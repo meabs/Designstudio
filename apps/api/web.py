@@ -237,6 +237,16 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_header('Cache-Control', 'no-cache')
                 self.end_headers()
                 return self.wfile.write(data)
+            if path.startswith('/api/handoff/'):
+                from handoff import build_handoff
+
+                fname, data = build_handoff(get(path.split('/')[-1]))
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/zip')
+                self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                return self.wfile.write(data)
             if path.startswith('/api/export/'):
                 rec = get(path.split('/')[-1])
                 proto = 'variant_id' in rec
@@ -378,6 +388,14 @@ class Handler(SimpleHTTPRequestHandler):
                     if d.get('pair_free'):
                         free_ov = dict(d.get('overrides') or {}, free=level)
                         result += launch(dict(base, overrides=free_ov, idempotency_key=(kk + ':free') if kk else None), 'generate_board', d['project_id'])
+            elif action == 'draft-guidelines':
+                import assist
+
+                result = assist.launch_guidelines_draft(d['project_id'], d['runner_id'], d.get('brief'))
+            elif action == 'ask-pin':
+                import assist
+
+                result = assist.launch_pin_ask(d['variant_id'], d['screen'], d.get('element_id'), d.get('question'), d['runner_id'])
             elif action == 'profile-create':
                 result = profile_create(d['project_id'], d.get('name'), d.get('copy_from'))
             elif action == 'profile-update':

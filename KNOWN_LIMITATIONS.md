@@ -45,3 +45,8 @@ The full build specification acceptance checklist has not been formally certifie
 
 - Board targets shape the brief, the screenshot size and the checks; they do not make the output native. A mobile-app board is a phone-sized HTML mock-up: no native iOS or Android controls, gestures or real navigation stacks. A board is still a journey of up to 12 screens, not a whole site map or app.
 - On a "both" board only the two named widths are screenshotted (no tablet). Changed regions come from an HTML diff that doesn't depend on width and are drawn in whichever view you are reviewing; mixed versions carry both screenshots across.
+
+- Spread is now on by default for several agents, which means a default comparison is no longer like-for-like (each agent gets a different direction). Untick it when you need identical inputs.
+- Merging a part of one design into another is an agent's rebuild, not a copy: expect the idea and content to carry over but not pixel-identical markup, and review the result. Drafted guidelines, pin answers and merges are agent output, never verified.
+- A cut-off run is only kept when the manifest and every screen were written; the last polish may be missing.
+- The developer hand-off is static HTML, CSS and JS. It does not generate a React or framework project.

@@ -21,7 +21,11 @@ class DesignToolsTest(unittest.TestCase):
   for j in a: self.assertIn('DIRECTION FOR THIS VARIANT',j['instruction']); self.assertIn(j['angle'],j['instruction'])
   self.assertEqual(len({j['input_hash'] for j in a}),2)
   b=self.launch(spread=True); self.assertNotEqual([j['angle'] for j in a],[j['angle'] for j in b])
-  plain=self.launch(); self.assertTrue(all(not j['angle'] for j in plain)); self.assertNotIn('DIRECTION',plain[0]['instruction'])
+  plain=self.launch(spread=False); self.assertTrue(all(not j['angle'] for j in plain)); self.assertNotIn('DIRECTION',plain[0]['instruction'])
+ def test_spread_is_on_by_default_for_several_runners_only(self):
+  many=self.launch(); self.assertEqual(len({j['angle'] for j in many}),2)
+  with patch.object(boards,'enqueue'): one=s.launch(dict(board_id=self.b['id'],brief='b',runner_ids=self.r[:1]),'generate_board',self.p['id'])
+  self.assertFalse(one[0]['angle'])
  def test_pair_offset_gives_matching_directions(self):
   n=boards.spread_offset(self.b['id']); a=self.launch(spread=True,spread_offset=n); b=self.launch(spread=True,spread_offset=n,overrides=dict(free='open'))
   self.assertEqual([j['angle'] for j in a],[j['angle'] for j in b])

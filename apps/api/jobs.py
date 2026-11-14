@@ -323,8 +323,22 @@ def cancel_job(jid):
             event(j, 'cancelled', 'Cancelled before it started')
 
 
+def cut_off_output_complete(j, source):
+    # True when a generate/revise run timed out after writing a readable manifest and a file for every requested screen.
+    if j['type'] not in ('generate_board', 'revise_board') or not j.get('board_id'):
+        return False
+    try:
+        manifest = json.loads((source / 'manifest.json').read_text())
+        board = get(j['board_id'])
+        files = [sd['file'] for sd in manifest['screens']]
+        return len(files) == len(board['screens']) and all((source / f).is_file() for f in files)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def _execute(j):
     folder = None
+    cut_off = False
     try:
         event(j, 'running', 'Runner started with immutable context snapshot')
         ctx = j['context']
@@ -355,8 +369,15 @@ def _execute(j):
                 )
             if runner.get('sandbox') == 'bwrap':
                 command = sandbox_command(runner, command, out)
-            if run_cli(command, out, min(int(runner.get('timeout', 120)), 600), j, runner):
-                raise ValueError('CLI runner failed; see runner.log in the job history')
+            try:
+                if run_cli(command, out, min(int(runner.get('timeout', 120)), 1800), j, runner):
+                    raise ValueError('CLI runner failed; see runner.log in the job history')
+            except subprocess.TimeoutExpired:
+                # Agents often finish the screens and then keep polishing until the clock runs out. If the deliverables are all there, keep them.
+                if not cut_off_output_complete(j, out / 'output'):
+                    raise
+                cut_off = True
+                event(j, 'running', 'Time limit reached, but every screen and the manifest were written: keeping the work and marking it as cut off')
         time.sleep(0.4)
         check_cancel(j)
         if j['type'] == 'research':
@@ -408,6 +429,12 @@ def _execute(j):
             from audit import finish_doc_review
 
             finish_doc_review(j, out, runner['type'])
+        elif j['type'] in ('guidelines_draft', 'pin_ask'):
+            import assist
+
+            if runner['type'] != 'cli':
+                raise ValueError('This needs a coding agent, not a template runner')
+            (assist.finish_guidelines_draft if j['type'] == 'guidelines_draft' else assist.finish_pin_ask)(j, out)
         else:
             board = get(j['board_id'])
             parent = get(j['parent_id']) if j.get('parent_id') else None
@@ -427,6 +454,7 @@ def _execute(j):
                 approved=False,
                 created_at=time.time(),
                 changes=[],
+                cut_off=cut_off,
             )
             folder = core.STORE / 'variants' / variant['id']
             (folder / 'screens').mkdir(parents=True)
@@ -647,7 +675,7 @@ def _execute(j):
             save('variant', variant)
             j['variant_id'] = variant['id']
             folder = None
-        event(j, 'succeeded', 'Artifacts saved and deterministic validation completed')
+        event(j, 'succeeded', 'Artifacts saved and deterministic validation completed' + (' (the agent was cut off at the time limit; review for unfinished polish)' if cut_off else ''))
     except Cancelled:
         if folder:
             shutil.rmtree(folder, ignore_errors=True)

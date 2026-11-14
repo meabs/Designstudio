@@ -401,6 +401,21 @@ def launch(data, kind, project_id):
             dict(id='states-' + str(s['id']), variant_id=pv['id'], screen=str(s['id']), comment=STATES_NOTE, virtual=True)
             for s in pv['manifest']['screens']
         ]
+    elif kind == 'revise_board' and data.get('merge'):
+        # Bring one part of another design into this one: virtual feedback on the target screen, with the donor staged beside the job.
+        pv = get(data['parent_id'])
+        mg = data['merge']
+        donor = get(mg['donor_id'])
+        part = ' '.join(str(mg.get('part', '')).split())[:300]
+        if not part:
+            raise ValueError('Describe which part to bring over (for example "the hero", "the pricing table")')
+        if donor['project_id'] != pv['project_id'] or donor['id'] == pv['id']:
+            raise ValueError('Choose a different design from this project to take the part from')
+        if (get(pv['board_id']).get('blind') and not get(pv['board_id']).get('revealed')):
+            raise ValueError('Merging is not available while the board is blind; it would reveal which design is which')
+        if str(mg['screen']) not in {s['id'] for s in pv['manifest']['screens']} or str(mg['donor_screen']) not in {s['id'] for s in donor['manifest']['screens']}:
+            raise ValueError('Choose valid screens')
+        annotations = [dict(id='merge-' + str(mg['screen']), variant_id=pv['id'], screen=str(mg['screen']), virtual=True, comment=f'Merge: bring the {part} from the donor design\'s screen {mg["donor_screen"]} into this screen.')]
     elif kind == 'revise_board':
         ids = data.get('annotation_ids', [])
         annotations = [get(i) for i in ids]
@@ -460,7 +475,7 @@ def launch(data, kind, project_id):
             else []
         )
         angle = ''
-        if data.get('spread') and kind == 'generate_board':
+        if kind == 'generate_board' and (data['spread'] if 'spread' in data else len(runners) > 1):
             off = data['spread_offset'] if 'spread_offset' in data else spread_offset(data.get('board_id'))
             angle = ANGLES[(runners.index(runner_id) + off) % len(ANGLES)]
         j = dict(
@@ -512,6 +527,12 @@ def launch(data, kind, project_id):
             if ctx.get('run_overrides', {}).get('prose')
             else ''
         )
+        if data.get('merge') and kind == 'revise_board':
+            mg = data['merge']
+            run_text += (
+                f'\nMERGE TASK: the donor design is in donor/ (read only; screens/{mg["donor_screen"]}.html is the source screen). Bring the "{" ".join(str(mg.get("part", "")).split())[:300]}" into screen {mg["screen"]} of THIS design. '
+                'Rebuild it in this design\'s own visual language (its CSS, tokens and typography): do not paste the donor\'s CSS or classes. Keep the content and structure that make the donor\'s version good. Keep everything else on the screen, and every other screen, unchanged. Do not copy anything from donor/ into output/.'
+            )
         if j.get('angle'):
             run_text += '\nDIRECTION FOR THIS VARIANT (the designer wants the runners to diverge; commit to this angle and make it clearly different from a conventional take): ' + j['angle']
         free_mode = ctx.get('run_overrides', {}).get('free')
@@ -529,6 +550,10 @@ def launch(data, kind, project_id):
         save('job', j)
         jobs.append(j)
         snapshot_references(j, core.STORE / 'projects' / project_id / 'references')
+        if data.get('merge') and kind == 'revise_board':
+            import shutil
+
+            shutil.copytree(core.STORE / 'variants' / data['merge']['donor_id'], core.STORE / 'jobs' / j['id'] / 'donor', ignore=shutil.ignore_patterns('thumbnails', 'changes.json'))
         enqueue(j)
     if kind == 'generate_board' and board_for_refs is not None and 'reference_ids' in data:
         board_for_refs['reference_ids'] = [r['id'] for r in references]
