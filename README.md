@@ -70,7 +70,9 @@ cd Designstudio
 make run        # builds the UI on first run, then starts the server
 ```
 
-Open <http://localhost:5173>. With no agents installed you can still use the built-in **template runners**, which need no API key; add a real agent under **Settings → Agents & models**. Data lives in `storage/` (SQLite plus generated files).
+Open <http://localhost:5173>. On first start the studio adds any installed **Claude Code** and **Codex** as runners; add others, or change models, under **Settings → Agents & models**. Without an agent installed there is nothing to generate with (set `STUDIO_SEED_FIXTURES=1` for offline template runners). Data lives in `storage/` (SQLite plus generated files).
+
+**Single-file build (no Python or Node needed to run it):** `./packaging/build.sh` produces `dist/designstudio` for the platform you build on (PyInstaller cannot cross-compile). Running it starts the studio and opens your browser; data is kept in `~/.local/share/designstudio` (or the macOS/Windows equivalent). Chrome and your agent CLIs are still needed on the machine. Only the Linux build has been tested.
 
 Port in use? `PORT=5174 python3 apps/api/server.py`.
 

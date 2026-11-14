@@ -674,6 +674,10 @@ def main():
         if resumed:
             print(f'Resumed {resumed} queued job(s) after restart', flush=True)
         print(f'Design Studio → http://localhost:{port}', flush=True)
+        if os.environ.get('STUDIO_OPEN_BROWSER', '1' if getattr(sys, 'frozen', False) else '0') == '1':
+            import webbrowser
+
+            threading.Timer(0.8, lambda: webbrowser.open(f'http://localhost:{port}')).start()
         if lan_mode():
             urls = [f'http://{ip}:{port}' for ip in lan_ips()] or [f'http://<this-computer>:{port}']
             print('LAN mode: reachable from your network at ' + ', '.join(urls), flush=True)

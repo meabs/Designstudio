@@ -4,10 +4,25 @@ import logging, sys, os, json, sqlite3, uuid, hashlib, threading, time
 from pathlib import Path
 from contextlib import contextmanager
 
-ROOT = Path(__file__).resolve().parents[2]
-STORE = Path(os.environ.get('STUDIO_STORAGE', ROOT / 'storage'))
-STORE.mkdir(parents=True, exist_ok=True)
-STORE = Path(os.environ.get('STUDIO_STORAGE', ROOT / 'storage'))
+FROZEN = bool(getattr(sys, 'frozen', False))
+# In the packaged executable the bundled files (the built UI) live in PyInstaller's extraction folder.
+ROOT = Path(getattr(sys, '_MEIPASS', '')) if FROZEN else Path(__file__).resolve().parents[2]
+
+
+def default_store():
+    if not FROZEN:
+        return ROOT / 'storage'
+    # Packaged build: keep your data in a per-user folder, never next to the executable.
+    if sys.platform == 'darwin':
+        base = Path.home() / 'Library/Application Support'
+    elif sys.platform.startswith('win'):
+        base = Path(os.environ.get('APPDATA') or Path.home() / 'AppData/Roaming')
+    else:
+        base = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
+    return base / 'designstudio'
+
+
+STORE = Path(os.environ.get('STUDIO_STORAGE') or default_store())
 STORE.mkdir(parents=True, exist_ok=True)
 LOCK = threading.RLock()
 log = logging.getLogger('studio')

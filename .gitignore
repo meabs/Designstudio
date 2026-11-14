@@ -7,3 +7,5 @@ playwright-report/
 test-results/
 backups/
 apps/ui/dist/
+.build-venv/
+/dist/
