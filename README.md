@@ -1,106 +1,173 @@
+<div align="center">
+
 # Design Studio
 
-A local, single-user design workbench with persistent guidance, research, independent screen boards, visual feedback and static click-through export.
+**Direct AI coding agents like a design team, and keep the judgment.**
 
-## Run
+A local, single-user workbench where designers brief Claude Code and Codex, compare what each one makes, test different rules, review with pins, audit against their own documents, and decide with a paper trail.
 
-Requirements: Python 3.10+ to run the studio; Node 20+ and npm **once, to build the UI** (`make run` does it for you the first time); Google Chrome on PATH as `google-chrome` for rendered screenshot previews. Coding-agent CLIs are optional and use their existing local authentication.
+[![CI](https://github.com/meabs/Designstudio/actions/workflows/ci.yml/badge.svg)](https://github.com/meabs/Designstudio/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![React](https://img.shields.io/badge/UI-React%2019%20%C2%B7%20Tailwind%20v4-61DAFB?logo=react&logoColor=black)
+![No Docker](https://img.shields.io/badge/runs%20with-no%20Docker-informational)
 
-```sh
-make run        # builds the UI on first run, then starts the server
-```
+<br />
 
-Open http://localhost:5173. Optional: `STUDIO_SHARE_PORT=5180` serves read-only prototype share links on a separate port (see the user guide). No package installation or API key is required for fixture mode. SQLite and generated artifacts are stored in `storage/`. Configure `PORT` and `STUDIO_STORAGE` through environment variables if needed.
+[![Watch the 100-second tour](docs/promo-preview.gif)](https://github.com/meabs/Designstudio/releases/download/v0.1.0/design-studio-tour-landscape.mp4)
 
-If startup reports that the port is already in use, choose another port:
+**[▶ Watch the 100-second tour](https://github.com/meabs/Designstudio/releases/download/v0.1.0/design-studio-tour-landscape.mp4)** · [portrait version for social](https://github.com/meabs/Designstudio/releases/download/v0.1.0/design-studio-tour-portrait.mp4)
 
-```sh
-PORT=5174 python3 apps/api/server.py
-```
+<sub>Everything in the video is the real app, recorded against real Claude Code and Codex runs.</sub>
 
-Open the URL printed after the server successfully starts.
+</div>
+
+---
+
+## Contents
+
+[Why](#why) · [Highlights](#highlights) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Working with agents](#working-with-agents) · [Operating it](#operating-it) · [Security model](#security-model) · [Architecture](#architecture) · [Development](#development) · [Status and limitations](#status-and-limitations)
+
+## Why
+
+Coding agents can produce a whole interface in a minute. What they do not give a designer is **control and evidence**: which rules were in force, what each agent actually did, how two directions compare, and why one was chosen.
+
+Design Studio puts that around the agents. Every run is a job with an **immutable snapshot** of the guidelines it was given. Agents work independently, cannot see each other's output, and their results are validated, compared and reviewed in one place. It runs on your machine, uses the agents you already have logged in, and needs no Docker, no database server and no sign-up.
+
+## Highlights
+
+| | |
+|---|---|
+| **Independent variants** | One brief goes to several agents (Claude Code, Codex, or built-in template runners). Each gets the same inputs and snapshot and cannot see the others. Optional blind A/B hides which agent made what. |
+| **Experiment freely** | **Spread** gives each agent a different direction. **Free exploration** drops the rules and checks for a run. **Rules vs free** runs everything twice for a side-by-side, and a **rule-break log** shows what the rules would have said. |
+| **Guideline profiles** | Keep several named, separately versioned sets of `DESIGN.md`, rules and tokens per project, and run every agent under each to compare. |
+| **Bring your own files** | Import `DESIGN.md`, rules files and token files (JSON or CSS variables) from a folder or the browser. Review the draft, then save a version. No pasting. |
+| **Live visibility** | Watch each agent's progress, screens written, elapsed time and usage while it runs, with a time and cost estimate before you start. |
+| **Pin, don't prompt** | Pin feedback on a screen element. Revisions can be limited to the pinned region, and the studio checks that nothing else changed. A revision is a new child version you accept or revert. |
+| **Audit on demand** | A manual audit runs accessibility checks (WCAG-referenced) plus checklists from **your own Markdown documents** (legal, design review). An optional agent reading of those documents is always labelled unverified. |
+| **Decide with a trail** | Approve or set aside with a reason, share the decision log as Markdown, and build an immutable, clickable prototype with a read-only share link. |
+| **Pull style back** | Extract colours, fonts and radii from a good variant straight into the guidelines. Add realistic empty, loading, error and long-content states to any version. |
+| **Works on your phone** | Opt in to LAN mode and review from a phone on the same Wi-Fi. |
 
 ## Screenshots
 
 | | |
 |---|---|
-| ![Board canvas](docs/screenshots/01-board-canvas.png) | ![Review with comment pins](docs/screenshots/02-review-comment-pins.png) |
-| ![Compare parent vs revision](docs/screenshots/03-compare-parent-vs-revision.png) | ![Reference library](docs/screenshots/04-references-library.png) |
-| ![Research with reference images](docs/screenshots/05-research-with-references.png) | ![Generate with references](docs/screenshots/06-generate-with-references.png) |
+| ![Board with rounds of variants from different agents and profiles](docs/screenshots/readme/01-board.png)<br /><sub>**Board.** Rounds of independent variants, each tagged with agent and guideline profile.</sub> | ![Rules vs free comparison](docs/screenshots/readme/02-compare-rules-vs-free.png)<br /><sub>**Rules vs free.** The same idea with and without the rules, side by side.</sub> |
+| ![Generate dialog with profiles, spread and rules-vs-free](docs/screenshots/readme/05-generate-profiles.png)<br /><sub>**Experiment.** Profiles, spread directions and rules-vs-free in one dialog.</sub> | ![Review with pinned comment](docs/screenshots/readme/03-review-pins.png)<br /><sub>**Review.** Pin feedback to an element; revise only that region.</sub> |
+| ![Audit tab with accessibility and document checks](docs/screenshots/readme/04-audit.png)<br /><sub>**Audit.** Accessibility checks and your own documents, run when you decide.</sub> | ![Import guidelines from a folder](docs/screenshots/readme/06-import-guidelines.png)<br /><sub>**Import.** Bring existing DESIGN.md, rules and tokens; review before saving.</sub> |
+| ![Decision log](docs/screenshots/readme/07-decision-log.png)<br /><sub>**Decision log.** Every approval and set-aside with its reason.</sub> | ![Prototype player](docs/screenshots/readme/08-prototype.png)<br /><sub>**Prototype.** An approved version becomes a clickable bundle.</sub> |
 
-More in [docs/screenshots](docs/screenshots). Regenerate them with `tests/snapshots.mjs` (fixture runners only).
+<p align="center"><img src="docs/screenshots/readme/09-phone.png" alt="The studio on a phone" width="260" /><br /><sub>The same studio on a phone over Wi-Fi.</sub></p>
 
-## Workflow
+## Quick start
 
-See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for the full walkthrough. In short:
-
-1. **References** – upload moodboards, competitor screens or sketches (PNG/JPEG/WebP/GIF, 5 MB each) and add a note for the agent. Tick which ones to send with research and with generation. Each job keeps its own copy, listed in the task text under `references/`.
-2. **Guidelines** – edit `DESIGN.md` (live preview), tokens (table and swatches) and rules (stable IDs, per-rule versions). Save a version; identical saves do not create new versions. Every job snapshots the saved version and its SHA-256.
-3. **Research** – ask a question, optionally add URLs or pasted excerpts (kept as *supplied*, never verified for you). Use all or selected findings to create a new board, or attach them to an existing board.
-4. **Generate** – pick two or more runners (fixtures by default, so no API key is needed). Failed, timed-out or cancelled runs get a card with **Retry** (same inputs); other variations stay usable.
-5. **Compare** – choose any two versions side by side, including a parent and its revision.
-6. **Review** – click a screen to pin feedback (anchored to a `data-design-id` element where possible), edit or delete pins, tick which pins to use, then **Revise selection**. A revision is a new child version that you **Accept** or **Revert**; the parent is never modified.
-7. **Checks** – deterministic results are shown separately from items that need your judgement; mark each review item OK or needs-change.
-8. **Approve & build prototype** – approval pins and locks the version, builds an immutable bundle and opens the player (back/forward, Default/Help/Error states, 1440/390 device framing, new tab, ZIP export).
-9. **History** – lineage from context to prototype, job inputs/outputs and logs.
-
-## Checking a real agent (contract doctor)
+**Requirements:** Python 3.10+. Node 20+ and npm **once**, to build the UI (`make run` does it the first time). Google Chrome on `PATH` as `google-chrome` for rendered screenshot previews. Coding-agent CLIs (Claude Code, Codex) are optional and use their own existing login.
 
 ```sh
-python3 apps/api/doctor.py claude --guidance --references --region --mix     # or: codex (runs inside the sandbox when bubblewrap works)
+git clone https://github.com/meabs/Designstudio.git
+cd Designstudio
+make run        # builds the UI on first run, then starts the server
 ```
 
-Runs the agent through the studio's own runner path on a throwaway project (temporary storage; your projects are untouched) and reports each stage: manifest and package validation, screenshots, whether changing a token changes the output (`--guidance`) and whether the agent really read a reference image (`--references`), whether a pinned-element revision changes only that element (`--region`) and whether mixed versions render identically to their sources (`--mix`). It uses your own agent login and makes 1–6 real model calls depending on flags (several minutes). Add `--keep` to inspect the generated files.
+Open <http://localhost:5173>. With no agents installed you can still use the built-in **template runners**, which need no API key; add a real agent under **Settings → Agents & models**. Data lives in `storage/` (SQLite plus generated files).
 
-## Verification
+Port in use? `PORT=5174 python3 apps/api/server.py`.
+
+## How it works
+
+```
+ References ─┐
+ Guidelines ─┼─►  immutable snapshot ──►  runner A ─┐
+ (profile)   │    (DESIGN.md + rules      runner B ─┼─► variants ─► compare ─► review & pin ─► revise
+ Research ───┘     + tokens + hash)       runner C ─┘        │                                   │
+                                                             ▼                                   ▼
+                                                      checks & audit ───────────► approve (reason) ─► prototype ─► share
+```
+
+1. **Set up guidelines.** Edit or import `DESIGN.md`, tokens and rules; save a version. Create **profiles** to test alternatives.
+2. **Brief and generate.** Pick two or more runners, optionally spread directions, rules-vs-free, or several profiles. See the estimate, then watch live progress.
+3. **Compare and review.** Put any two versions side by side. Pin feedback and revise; accept or revert each revision (the parent is never modified).
+4. **Check and audit.** Deterministic checks are shown separately from items needing your judgement. Run the audit on the version you are about to ship.
+5. **Decide and ship.** Approve with a reason, build the prototype, share it read-only.
+
+The full walkthrough is in the **[User guide](docs/USER_GUIDE.md)**.
+
+## Working with agents
+
+| Runner | Notes |
+|---|---|
+| **Template (fixture)** | Offline and deterministic. Applies tokens and simple colour directives. For demos, tests and trying the workflow. |
+| **Claude Code, Codex** | Local CLIs through their existing authentication. Run inside a **bubblewrap filesystem sandbox** when available, with an environment allow-list. Each run has a timeout, automatic retry options and a full runner log. |
+
+Agent output is untrusted: it is limited to an allow-list of file types, validated against the [runner contract](docs/RUNNER_CONTRACT.md), and its self-report is shown but never presented as verified.
+
+Check that a real agent honours the contract end to end on a throwaway project (makes real model calls with your login):
 
 ```sh
-make check      # builds the UI (type-checks and bundles it), then Python tests, UI unit tests and tsc
+python3 apps/api/doctor.py claude --guidance --references --region --mix   # or: codex
 ```
 
-Browser workflow (needs Node, Playwright and Chrome; use a disposable storage directory; fixture runners only):
+## Operating it
+
+| Need | How |
+|---|---|
+| Start / stop | `make run`; Ctrl-C or `SIGTERM` stops workers cleanly. Jobs that were running are marked failed on the next start and can be retried; queued jobs resume. |
+| Phone / other devices | `make run-lan`, then open the `http://<your-ip>:5173` address it prints, on the same Wi-Fi. **There is no login**: anyone on that network can use the studio and spend your agent credits, so use it only on a network you trust. Other devices cannot change runners or read folders. |
+| Health | `GET /api/health`: uptime, workers, queue depth, job counts, free disk, sandbox availability. |
+| Logs | stderr and `storage/studio.log` (rotating). No prompts, request bodies or agent output are logged. |
+| Backup | `make backup` (online SQLite backup plus files, safe while running). Restore by pointing `STUDIO_STORAGE` at the backup. |
+| Configuration | `PORT`, `STUDIO_HOST`, `STUDIO_STORAGE`, `STUDIO_MAX_JOBS`, `STUDIO_SHARE_PORT`, `STUDIO_SHARE_HOST`, `STUDIO_ALLOWED_HOSTS`, `STUDIO_LOG_LEVEL`. |
+| Share links | `STUDIO_SHARE_PORT=5180` serves read-only prototype links on a separate listener (loopback unless `STUDIO_SHARE_HOST` is set). |
+
+## Security model
+
+Design Studio is a **single-user local tool**, not a multi-user service.
+
+- Binds to `127.0.0.1` and rejects any `Host` that is not a loopback name (DNS-rebinding guard), because the studio can launch local agents. LAN mode is opt-in and widens this only to this computer's own address and `.local` name (plus `STUDIO_ALLOWED_HOSTS`).
+- JSON-only POSTs; unexpected errors return a request id and log details server-side.
+- Runner administration and reading arbitrary folders are allowed only from the computer running the studio.
+- Agents run in a filesystem sandbox with an environment allow-list; generated screens are shown in sandboxed iframes.
+- Do not expose the port beyond your machine or a trusted network.
+
+## Architecture
+
+```
+apps/
+  api/   Python standard library only: ThreadingHTTPServer + SQLite (one entity table, WAL)
+  ui/    React 19 + TypeScript, Tailwind v4, coss ui (Base UI); built to apps/ui/dist and served by the API
+docs/    user guide, decisions, runner contract, screenshots
+tests/   unittest suite, browser end-to-end scripts
+promo/   Remotion project and recording scripts for the tour video
+```
+
+**API modules** (`apps/api/`): `server.py` (entry point and facade), `core` (storage, ids, logging), `contexts` (projects, versioned guidance, profiles), `fixture`, `regions`, `validation`, `jobs` (queue, workers, sandbox, retries), `references`, `research`, `boards` (launch, overrides, blind A/B), `prototypes`, `audit`, `importer`, `sharing`, `web` (HTTP), plus `local_agents`, `doctor`, `backup`. Dependencies point one way.
+
+**UI** (`apps/ui/`): `src/lib` (store, router, pure logic with tests), `src/components/ui` (coss components, copied in so they are editable), `src/components/app` (shell, dialogs, progress), `src/views`, `src/tools.tsx` (audit, profiles, import and the other designer tools), `src/actions.tsx`. Node is needed only to build; the running studio has no Node dependency.
+
+Design rationale is recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
+
+## Development
+
+```sh
+make check       # builds the UI (type-checks and bundles), then Python tests, UI unit tests and tsc
+make ui-dev      # UI hot reload on :5174 (run `make run` for the API on :5173 first)
+```
+
+Browser end-to-end (needs Node, Playwright and Chrome; uses a disposable store and fixture runners only):
 
 ```sh
 npm install --no-save @playwright/test
 STUDIO_STORAGE=$(mktemp -d) PORT=5199 python3 apps/api/server.py &
-STUDIO_URL=http://localhost:5199 node tests/browser.mjs
-STUDIO_URL=http://localhost:5199 node tests/snapshots.mjs   # regenerate docs/screenshots
+STUDIO_URL=http://localhost:5199 node tests/browser.mjs   # core workflow
+STUDIO_URL=http://localhost:5199 node tests/tools.mjs     # designer tools
 ```
 
-See [Known limitations](KNOWN_LIMITATIONS.md), [decisions](docs/DECISIONS.md) and [runner contract](docs/RUNNER_CONTRACT.md). This is an initial implementation; the full specification acceptance checklist is not yet certified.
+CI runs `make check` on every push. Add a coss component with `cd apps/ui && npx shadcn@latest add @coss/<name>`.
 
-## Running it as a POC (no Docker)
+**Promo video.** `promo/` records the real UI by script and renders the tour with [Remotion](https://www.remotion.dev) in landscape and portrait. See [promo/README.md](promo/README.md).
 
-| Need | How |
-|---|---|
-| Start / stop | `make run`; Ctrl-C or `SIGTERM` stops workers cleanly. Jobs that were running are marked failed on next start and can be retried; queued jobs resume. |
-| Health | `GET /api/health` → uptime, live workers, queue depth, job counts, free disk, sandbox availability. |
-| Logs | stderr and `storage/studio.log` (rotating, 2 MB x 3). Requests, job errors and unexpected 500s (with a request id returned to the client). No prompts, bodies or agent output are logged. |
-| Backup | `make backup` (SQLite online backup + job/variant/prototype/project files into `backups/<time>/`, safe while running). Restore: stop, point `STUDIO_STORAGE` at the backup folder. |
-| Tests | `make check` (syntax + Python + JS); CI runs the same on push (`.github/workflows/ci.yml`). Browser e2e and real-agent `make doctor AGENT=claude` stay manual. |
-| Access | Binds `127.0.0.1` only and rejects any `Host` that is not `localhost`/`127.0.0.1`/`[::1]` (DNS-rebinding guard; the studio can launch local agents). Add names with `STUDIO_ALLOWED_HOSTS=studio.lan`. The share listener also defaults to loopback; set `STUDIO_SHARE_HOST=0.0.0.0` (plain HTTP, no auth beyond the unguessable token) to let others reach it. |
-| Phone / other devices | `make run-lan` (sets `STUDIO_HOST=0.0.0.0`) and open the `http://<your-ip>:5173` address it prints, on the same Wi-Fi. There is no login, so anyone on that network can use the studio and spend your agent credits; use only on a network you trust. Over LAN, other devices cannot add or change runners (that stays on the computer running the studio). Names other than this computer's own (`<hostname>.local`) are rejected; add one with `STUDIO_ALLOWED_HOSTS`. If the phone cannot connect, allow the port in your firewall (e.g. `sudo ufw allow 5173/tcp`). |
-| Config | `PORT`, `STUDIO_HOST`, `STUDIO_STORAGE`, `STUDIO_MAX_JOBS`, `STUDIO_SHARE_PORT`, `STUDIO_SHARE_HOST`, `STUDIO_ALLOWED_HOSTS`, `STUDIO_LOG_LEVEL`. |
+## Status and limitations
 
-Not a multi-user deployment: there is no login, so do not expose the studio port beyond your machine.
+This is a proof of concept that is good enough to use daily on your own machine, not a hardened product. Notable limits: the audit is static (it reads delivered HTML and CSS, never renders them) and is evidence for a reviewer, not a compliance certification; agent self-reports and agent readings of your documents are unverified opinions; guideline import is heuristic; profiles are copies, not layers. The full list is in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
-## Code layout
-
-`apps/api/`: `server.py` (entry point, re-exports), `core.py` (storage, ids, logging), `contexts.py` (projects, versioned guidance and rules), `fixture.py` (fixture runner), `regions.py` (data-design-id diffing), `validation.py` (package checks), `jobs.py` (queue, workers, sandbox, retries, agent report), `references.py`, `research.py`, `boards.py` (boards, blind A/B, launch, overrides, conflict preview), `prototypes.py` (approval, mixing, review), `sharing.py`, `web.py` (HTTP handlers, health, `main`), plus `local_agents.py`, `doctor.py`, `backup.py`. Dependencies only point left to right in that order.
-
-## UI
-
-`apps/ui` is a React 19 + TypeScript app styled with Tailwind v4 and the [coss ui](https://coss.com/ui) components (Base UI primitives, copied into `src/components/ui` with the shadcn CLI, so they are ours to edit). Build output goes to `apps/ui/dist`, which the Python server serves (hashed files under `/ui/` are cached for a year; `index.html` always revalidates). There is no UI runtime dependency on Node: only building needs it.
-
-| Task | Command |
-|---|---|
-| Build | `make ui-build` |
-| Hot-reload development | `make run` in one terminal (API on :5173), `make ui-dev` in another (UI on :5174, proxies `/api` and `/assets`) |
-| Add a coss component | `cd apps/ui && npx shadcn@latest add @coss/<name>` |
-| UI unit tests / types | `cd apps/ui && npx vitest run && npx tsc --noEmit` |
-
-Source layout: `src/lib` (store, router, formatting, pure logic with tests), `src/components/ui` (coss), `src/components/app` (shell, dialogs, progress, reference picker), `src/views` (one file per area), `src/actions.tsx` (dialogs and named actions). Form controls that the end-to-end suite drives (`select`, checkboxes) are native elements on purpose.
-
-### Rolling back to the previous plain-JavaScript UI
-
-The old UI (no React, no build step) is preserved in `backups/ui-vanilla-before-react-<timestamp>.zip` (full working tree at the moment of the switch, including the uncommitted work before it). To go back: stop the server, unzip it over a fresh folder or restore `apps/web` and the previous `apps/api/web.py`, `Makefile` and `tests/` from it, and run `python3 apps/api/server.py`. `backups/` is git-ignored, so copy the zip somewhere safe if you want it to survive a fresh clone.
+No open-source licence has been chosen yet, so by default all rights are reserved.

@@ -1,0 +1,20 @@
+// Hero screenshots for the README, taken from the demo data (real Claude Code and Codex runs).
+import fs from 'node:fs'; import path from 'node:path';
+import { session, api } from './lib.mjs';
+const ids = JSON.parse(fs.readFileSync(process.env.IDS || '/tmp/demo-ids.json')); const P = ids.project, B = ids.board; const base = `/projects/${P}`, board = `${base}/boards/${B}`;
+const out = path.resolve(process.env.OUT || new URL('../../docs/screenshots/readme', import.meta.url).pathname); fs.mkdirSync(out, { recursive: true });
+const st = await api('state'); const jobBy = Object.fromEntries(st.job.map((j) => [j.id, j]));
+const vs = st.variant.filter((v) => v.board_id === B && !v.parent_id);
+const claudeMain = vs.find((v) => v.runner_name === 'Claude Code' && (v.profile_id || 'main') === 'main' && !jobBy[v.job_id].context.run_overrides?.free);
+const free = vs.find((v) => jobBy[v.job_id].context.run_overrides?.free);
+const savings = st.project.find((p) => p.name === 'Meridian Savings');
+const shot = async (name, fn, opts) => { const s = await session(name, opts); try { await fn(s); await s.page.waitForTimeout(700); await s.page.screenshot({ path: path.join(out, name + '.png') }); } finally { await s.ctx.close(); await s.page.context().browser().close(); } console.log('ok', name); };
+await shot('01-board', async (s) => { await s.goto(board); await s.scroll('main.workspace', 330, 10); });
+await shot('02-compare-rules-vs-free', async (s) => { await s.goto(`${board}/review/${free.id}`); await s.click(s.page.locator('[data-action="compare-twin"]').first(), { after: 1800 }); });
+await shot('03-review-pins', async (s) => { await s.goto(`${board}/review/${claudeMain.id}`); await s.page.locator('#pin-area img').waitFor(); await s.click(s.page.getByRole('tab', { name: /Comments/ }), { after: 600 }); const pin = s.page.locator('.pin').first(); if (await pin.count()) await s.click(pin, { after: 900 }); });
+await shot('04-audit', async (s) => { await s.goto(`${board}/review/${claudeMain.id}`); await s.click(s.page.getByRole('tab', { name: /Audit/ }), { after: 900 }); });
+await shot('05-generate-profiles', async (s) => { await s.goto(board); await s.click(s.page.getByRole('button', { name: /Generate variants/ }).first(), { after: 1200 }); await s.page.locator('#gen-profiles input').nth(1).check(); await s.page.locator('input[name="spread"]').check(); await s.page.locator('input[name="pair"]').check(); });
+await shot('06-import-guidelines', async (s) => { await s.goto(`/projects/${savings.id}/context`); await s.page.locator('#import-folder').fill('/tmp/meridian/brand'); await s.click(s.page.locator('[data-action="scan-folder"]'), { after: 1500 }); await s.page.locator('#import-result').waitFor(); await s.scroll('main.workspace', 120, 10); });
+await shot('07-decision-log', async (s) => { await s.goto(`${base}/history`); });
+await shot('08-prototype', async (s) => { const pr = st.prototype.at(-1); await s.goto(`${base}/prototypes/${pr.id}`); await s.page.locator('#player').waitFor(); await s.page.waitForTimeout(1500); });
+await shot('09-phone', async (s) => { await s.goto(board); await s.scroll(null, 420, 10); }, { width: 430, height: 932, dsf: 2, mobile: true });
