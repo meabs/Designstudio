@@ -73,7 +73,7 @@ export const checksOf = (v: any) => (v?.validation || []).map((x: any, i: number
 export const freeOf = (v: any, data: Data = getData()): string => data.job.find((j) => j.id === v?.job_id)?.context?.run_overrides?.free || '';
 export function twinOf(v: any, data: Data = getData()) {
   if (!v || v.parent_id || v.kind === 'mix' || !v.runner_id) return null; const mine = freeOf(v, data); const t = data.job.find((j) => j.id === v.job_id)?.created_at ?? v.created_at;
-  return data.variant.find((x) => x.id !== v.id && x.board_id === v.board_id && !x.parent_id && x.runner_id === v.runner_id && Math.abs(x.created_at - v.created_at) < 8 && (freeOf(x, data) ? 1 : 0) !== (mine ? 1 : 0) && Math.abs((data.job.find((j) => j.id === x.job_id)?.created_at ?? x.created_at) - t) < 8) || null;
+  return data.variant.find((x) => x.id !== v.id && x.board_id === v.board_id && !x.parent_id && x.runner_id === v.runner_id && (x.profile_id || 'main') === (v.profile_id || 'main') && (freeOf(x, data) ? 1 : 0) !== (mine ? 1 : 0) && Math.abs((data.job.find((j) => j.id === x.job_id)?.created_at ?? x.created_at) - t) < 8) || null;
 }
 export const unresolvedReviews = (v: any) => checksOf(v).filter((x: any) => x.outcome === 'review' && x.review?.decision !== 'accepted');
 export function variantStatus(v: any): [string, string] {

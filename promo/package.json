@@ -1,0 +1,23 @@
+{
+  "name": "design-studio-promo",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render src/index.ts Landscape out/design-studio-landscape.mp4 && remotion render src/index.ts Portrait out/design-studio-portrait.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.355",
+    "@remotion/google-fonts": "^4.0.355",
+    "@remotion/media-utils": "^4.0.355",
+    "@remotion/transitions": "^4.0.355",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "remotion": "^4.0.355"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "typescript": "^5.9.3"
+  }
+}

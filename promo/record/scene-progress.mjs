@@ -1,0 +1,11 @@
+import { session } from './lib.mjs'; import fs from 'node:fs';
+const ids = JSON.parse(fs.readFileSync(process.env.IDS || '/tmp/demo-ids.json'));
+const s = await session('progress'); await s.start();
+await s.goto(`/projects/${ids.project}/boards/${ids.board}`); await s.wait(2500);
+await s.page.mouse.move(900, 500, { steps: 10 });
+await s.click(s.page.locator('summary', { hasText: 'Live output' }).first(), { after: 900 });
+await s.wait(5000);
+await s.scroll(null, 120, 1400); await s.wait(3500);
+await s.click(s.page.locator('summary', { hasText: 'Live output' }).nth(1), { after: 900 });
+await s.wait(5000);
+console.log(await s.stop());

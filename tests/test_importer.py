@@ -31,4 +31,7 @@ class ImporterTest(unittest.TestCase):
    self.assertEqual(names,{'DESIGN.md',str(Path('sub')/'rules.md')}); self.assertTrue(any('symlink' in s for s in r['skipped'])); self.assertEqual(r['folder'],str(t.resolve()))
    with self.assertRaises(ValueError): im.read_folder(str(t/'nope'))
    with self.assertRaises(ValueError): im.read_folder('')
+ def test_duplicate_rule_keeps_the_copy_with_an_id(self):
+  r=self.parse(**{'DESIGN.md':'# D\n\n## Principles\n- Explain why sensitive details are requested\n','rules.md':'# Rules\n- [ ] **COPY-001** Explain why sensitive details are requested\n'})
+  self.assertEqual([(x['id'],x['description']) for x in r['rules']],[('COPY-001','Explain why sensitive details are requested')])
 if __name__=='__main__': unittest.main()

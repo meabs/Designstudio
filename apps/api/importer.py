@@ -170,12 +170,15 @@ def parse_files(files):
     primary = [d['file'] for d in docs if d['kind'] == 'design'] or [d['file'] for d in docs if d['kind'] == 'other'][:1]
     for d in docs:
         d['use'] = d['file'] in primary
-    seen, uniq = set(), []
+    # The same rule often appears as a principle in DESIGN.md and again, with its ID, in a rules file: keep the copy that has the ID.
+    by_text, uniq = {}, []
     for r in rules:
         k = r['description'].lower()
-        if k not in seen:
-            seen.add(k)
+        if k not in by_text:
+            by_text[k] = len(uniq)
             uniq.append(r)
+        elif uniq[by_text[k]]['id'] is None and r['id'] is not None:
+            uniq[by_text[k]] = r
     for n, r in enumerate(uniq, 1):
         r['n'] = n
     return dict(
