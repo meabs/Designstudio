@@ -35,3 +35,5 @@ The full build specification acceptance checklist has not been formally certifie
 - Rule-break logs use the project's current saved guidelines at generation time and the same deterministic checks as normal runs; most prose rules can only be listed for review.
 - Rules-vs-free doubles agent runs and cost. Spread directions are keyed to runner order, so they are comparable between a pair but not between rounds.
 - Style extraction lists hex colours, font stacks and px radii; it does not infer roles (accent vs background) or spacing scales.
+
+- Guideline import is heuristic: it decides what is a rule from file names, headings and wording ("must", "never", checklists), so prose-only guidance is imported as text, not rules, and a stray "must" bullet may need unticking. It reads `.md`, `.json` and `.css` only (no Figma, no Word/PDF). Re-importing is manual; the studio does not watch the folder.

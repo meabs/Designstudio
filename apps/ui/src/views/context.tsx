@@ -8,6 +8,7 @@ import { Ic } from '@/components/app/icons';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { OverrideList, ruleModal, saveDraft } from '@/actions';
+import { ImportPanel } from '@/tools';
 import { cn } from '@/lib/utils';
 
 function DiffBlock({ d }: { d: any }) {
@@ -37,6 +38,7 @@ export function ContextView() {
       <Content>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><span id="dirty-badge" className={cn('badge inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium', dirty ? 'warn bg-warning/10 text-warning-foreground' : 'success bg-success/10 text-success-foreground')}>{dirty ? 'Unsaved changes' : 'Saved · version ' + (ctx.version || versions.length)}</span>
           <div className="flex gap-2"><Button variant="outline" data-action="discard-draft" disabled={!dirty} onClick={() => ui.set({ draftFor: '' })}>Discard changes</Button><Button className="primary" data-action="save-context" disabled={!dirty || !!tok.err} onClick={save}>Save new version</Button></div></div>
+        <ImportPanel />
         <Note>Every job snapshots the <em>saved</em> version, never unsaved edits. New guidance affects new variations; existing images keep their original context. Template fixtures apply tokens and simple colour directives only; select a local coding agent for broader guidance.</Note>
         <Panel title={<>Brand guidelines <Tag>DESIGN.md</Tag></>}><div className="grid gap-5 md:grid-cols-2"><div><label className="mb-1.5 block text-xs font-medium" htmlFor="guidelines">Edit</label><Textarea id="guidelines" rows={12} data-draft="markdown" value={d.markdown} onChange={(e) => setDraft({ markdown: e.target.value })} /></div><div><span className="label mb-1.5 block text-xs font-medium">Preview</span><div className="md min-h-40 rounded-lg border bg-muted/30 p-4" id="md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(d.markdown) }} /></div></div></Panel>
         <Panel id="tokens" title="Design tokens" action={<label className="button-like inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg border bg-background px-3 text-sm font-medium"><Ic name="download" size={13} /> Import JSON<input type="file" id="token-file" accept=".json,application/json" hidden onChange={async (e) => { try { const f = e.target.files?.[0]; if (!f) return; if (f.size > 200000) throw Error('Token file is too large'); setDraft({ tokens: JSON.stringify(JSON.parse(await f.text()), null, 2) }); } catch (er: any) { toast(er.message); } e.target.value = ''; }} /></label>}>

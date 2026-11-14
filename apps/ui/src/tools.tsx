@@ -198,3 +198,51 @@ export function twinLink(v: any) {
   const t = twinOf(v); if (!t) return null; const free = freeOf(v) ? v : t; const normal = freeOf(v) ? t : v; return { left: normal.id, right: free.id, twin: t };
 }
 void getData;
+
+
+/* ---------- import existing guideline files (DESIGN.md, rules, tokens) into the draft ---------- */
+const readFiles = async (list: FileList | File[]) => Promise.all([...list].map(async (f: any) => ({ name: f.webkitRelativePath || f.name, text: await f.text() })));
+export function ImportPanel() {
+  const { p, ctx } = useCurrent(); const [folder, setFolder] = useState(p.guidelines_folder || ''); const [res, setRes] = useState<any>(null); const [busy, setBusy] = useState(false);
+  const [useDocs, setUseDocs] = useState<Set<string>>(new Set()); const [useRules, setUseRules] = useState<Set<number>>(new Set()); const [useTok, setUseTok] = useState<Set<string>>(new Set()); const [replace, setReplace] = useState(false);
+  useEffect(() => { setFolder(p.guidelines_folder || ''); }, [p.id, p.guidelines_folder]);
+  const show = (r: any) => {
+    const d = (ui.get().draft as any) || ctx; const have = new Set((d.rules || []).map((x: any) => String(x.description).toLowerCase())); let tokens: any = {}; try { tokens = JSON.parse(d.tokens || '{}'); } catch { /* ignore */ }
+    setRes(r); setUseDocs(new Set(r.docs.filter((x: any) => x.use).map((x: any) => x.file))); setUseRules(new Set(r.rules.filter((x: any) => !have.has(x.description.toLowerCase())).map((x: any) => x.n)));
+    setUseTok(new Set(r.tokens.filter((x: any) => String(tokens[x.name]) !== x.value).map((x: any) => x.name)));
+  };
+  const run = async (body: any) => { setBusy(true); try { const r = await api('scan-guidelines', body); show(r); if (body.folder) await refresh(); if (!r.docs.length && !r.rules.length && !r.tokens.length) toast('Nothing importable found in those files'); } catch (e: any) { toast(e.message); } finally { setBusy(false); } };
+  const toggle = <T,>(set: Set<T>, k: T, on: boolean, fn: (s: Set<T>) => void) => { const n = new Set(set); on ? n.add(k) : n.delete(k); fn(n); };
+  const apply = () => {
+    ensureDraft(ctx); const dd = ui.get().draft as any; const docs = res.docs.filter((x: any) => useDocs.has(x.file));
+    let markdown = dd.markdown; if (docs.length) { const text = docs.map((x: any) => (docs.length > 1 ? `<!-- from ${x.file} -->\n` : '') + x.text.trim()).join('\n\n'); markdown = replace || !markdown.trim() ? text : markdown.trimEnd() + '\n\n' + text; }
+    let tokens: any = {}; if (!replace) { try { tokens = JSON.parse(dd.tokens); } catch { return toast('Fix the tokens JSON in your draft first'); } } for (const t of res.tokens) if (useTok.has(t.name)) tokens[t.name] = t.value;
+    const rules = replace && useRules.size ? [] : [...dd.rules]; const ids = new Set(rules.map((r: any) => r.id)); const have = new Set(rules.map((r: any) => String(r.description).toLowerCase())); let added = 0;
+    for (const r of res.rules) { if (!useRules.has(r.n) || have.has(r.description.toLowerCase())) continue; let id = r.id || 'IMPORT-' + String(r.n).padStart(3, '0'); while (ids.has(id)) id += '-b'; ids.add(id); rules.push({ id, description: r.description, scope: 'project', severity: r.severity, verification: 'human_review', enabled: true, justification: `Imported from ${r.source}` }); added++; }
+    ui.set({ draft: { markdown, tokens: JSON.stringify(tokens, null, 2), rules } }); toast(`Loaded into your draft: ${docs.length} document${docs.length === 1 ? '' : 's'}, ${added} rules, ${[...useTok].length} tokens. Review, then Save new version.`);
+  };
+  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => { const fl = e.target.files; if (fl?.length) await run({ files: await readFiles(fl) }); e.target.value = ''; };
+  const n = useDocs.size + useRules.size + useTok.size;
+  return (
+    <Panel id="import-panel" title="Import from your files">
+      <p className="mb-3 text-xs text-muted-foreground">Already have a DESIGN.md, a rules file or design tokens? Point at the folder (or choose files) and pick what to bring in. Nothing is saved until you review the draft and press Save new version.</p>
+      <div className="flex flex-wrap gap-2"><Input id="import-folder" className="min-w-56 flex-1" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="/home/you/brand-docs (folder on this computer)" aria-label="Guidelines folder" />
+        <Button variant="outline" data-action="scan-folder" disabled={busy || !folder.trim()} onClick={() => run({ folder, project_id: p.id })}>{p.guidelines_folder === folder.trim() && res ? 'Re-scan' : 'Scan folder'}</Button>
+        <label className="inline-flex h-8.5 cursor-pointer items-center rounded-lg border bg-background px-3 text-sm font-medium sm:h-7.5">Choose files…<input id="import-files" type="file" multiple accept=".md,.markdown,.json,.css" hidden onChange={pick} /></label>
+        <label className="inline-flex h-8.5 cursor-pointer items-center rounded-lg border bg-background px-3 text-sm font-medium max-sm:hidden sm:h-7.5">Choose folder…<input id="import-dir" type="file" hidden onChange={pick} {...({ webkitdirectory: '', directory: '' } as any)} /></label></div>
+      {res && <div className="mt-4" id="import-result">
+        {res.docs.length > 0 && <><h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Guidelines text (DESIGN.md)</h3>
+          {res.docs.map((d: any) => <label key={d.file} className="my-1 flex items-center gap-2 text-sm font-normal"><input type="checkbox" className="size-4" checked={useDocs.has(d.file)} onChange={(e) => toggle(useDocs, d.file, e.target.checked, setUseDocs)} /><span className="font-mono text-xs">{d.file}</span><span className="text-muted-foreground">· {d.title} · {d.chars} chars{d.rule_count ? ` · ${d.rule_count} rule-like lines` : ''}</span></label>)}</>}
+        {res.rules.length > 0 && <><h3 className="mb-1 mt-4 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Rules ({useRules.size}/{res.rules.length}) <button className="font-normal normal-case underline" type="button" onClick={() => setUseRules(new Set(useRules.size ? [] : res.rules.map((r: any) => r.n)))}>{useRules.size ? 'none' : 'all'}</button></h3>
+          <div className="max-h-56 overflow-auto rounded-md border p-2">{res.rules.map((r: any) => <label key={r.n} className="my-1 flex items-start gap-2 text-[13px] font-normal"><input type="checkbox" className="mt-1 size-4" checked={useRules.has(r.n)} onChange={(e) => toggle(useRules, r.n, e.target.checked, setUseRules)} /><span><Tag>{r.id || 'auto ID'}</Tag> {r.description}<small className="block text-[11px] text-muted-foreground">{r.source} · {r.severity}</small></span></label>)}</div></>}
+        {res.tokens.length > 0 && <><h3 className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Tokens ({useTok.size}/{res.tokens.length})</h3>
+          <div className="max-h-44 overflow-auto rounded-md border p-2">{res.tokens.map((t: any) => <label key={t.name} className="my-1 flex items-center gap-2 text-[13px] font-normal"><input type="checkbox" className="size-4" checked={useTok.has(t.name)} onChange={(e) => toggle(useTok, t.name, e.target.checked, setUseTok)} />{/^#[0-9a-f]{3,8}$/i.test(t.value) && <span className="size-4 rounded border" style={{ background: t.value }} />}<span>{t.name}</span><span className="font-mono text-xs text-muted-foreground">{t.value}</span><span className="ml-auto text-[11px] text-muted-foreground">{t.source}</span></label>)}</div></>}
+        {res.skipped.length > 0 && <p className="mt-3 text-xs text-muted-foreground">Skipped: {res.skipped.join('; ')}</p>}
+        {(res.docs.length > 0 || res.rules.length > 0 || res.tokens.length > 0) && <div className="mt-4 flex flex-wrap items-center gap-4">
+          <label className="flex items-center gap-2 text-sm font-normal"><input type="radio" name="imp-mode" className="size-4" checked={!replace} onChange={() => setReplace(false)} /> Add to my draft</label>
+          <label className="flex items-center gap-2 text-sm font-normal"><input type="radio" name="imp-mode" className="size-4" checked={replace} onChange={() => setReplace(true)} /> Replace what I picked</label>
+          <Button className="primary" data-action="import-apply" disabled={!n} onClick={apply}><Ic name="download" size={13} /> Load into my draft</Button></div>}
+      </div>}
+    </Panel>
+  );
+}

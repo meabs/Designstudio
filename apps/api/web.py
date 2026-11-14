@@ -9,6 +9,7 @@ from contexts import context, project, seed
 from core import LOCK, ROOT, SHARE_PORT, STARTED, allof, db, get, log, safe_path, save, setup_logging, uid
 from jobs import JOBQ, MAX_JOBS, job_progress, WORKERS, cancel_job, recover_jobs, retry_job, start_workers, stop_workers
 from prototypes import approve, mix_variants, set_aside, set_review_state
+from importer import parse_files, read_folder
 from audit import apply_style, audit_review, audit_variant, extract_style, launch_doc_review, read_review_folder
 from references import add_reference, delete_reference
 from sharing import SHARE_JS, SHARE_PLAYER, share_create, share_find, share_revoke
@@ -434,6 +435,21 @@ class Handler(SimpleHTTPRequestHandler):
                 result = set_review_state(d['id'], 'reverted', d.get('note', ''))
             elif action == 'audit':
                 result = audit_variant(d['variant_id'])
+            elif action == 'scan-guidelines':
+                if d.get('folder'):
+                    # Reading an arbitrary folder is only for the computer running the studio; browsers elsewhere upload files instead.
+                    if lan_mode() and not is_local_client(self.client_address[0], self.connection.getsockname()[0]):
+                        raise ValueError('Folders can only be read from the computer running the studio; choose files instead')
+                    result = read_folder(d['folder'])
+                    if d.get('project_id') and d.get('remember', True):
+                        p = get(d['project_id'])
+                        p['guidelines_folder'] = result['folder']
+                        save('project', p)
+                else:
+                    fl = d.get('files')
+                    if not isinstance(fl, list) or not fl or not all(isinstance(x, dict) for x in fl):
+                        raise ValueError('Choose a folder or at least one file')
+                    result = parse_files(fl)
             elif action == 'audit-docs':
                 result = launch_doc_review(d['variant_id'], d['runner_id'])
             elif action == 'audit-review':

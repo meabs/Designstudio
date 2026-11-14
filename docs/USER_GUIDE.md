@@ -81,3 +81,16 @@ Add local coding-agent configurations (model optional), rename, enable/disable, 
 **Responsive preview.** The live preview has Phone / Tablet / Desktop width buttons.
 
 **Agent reading of your documents.** For checklist items that can't be matched literally, the Audit tab has *Agent reading of your documents*: pick an agent and press *Read*. It reads your Markdown and the version's screens and answers *meets / fails / could not tell* per item, with the evidence it saw. It is manual, costs one agent run, and is always labelled an unverified opinion. The template (fixture) runners can't read documents and say so.
+
+
+## Importing existing guidelines
+
+Already have a `DESIGN.md`, rules files or design tokens? On **Guidelines → Import from your files** enter the folder path (on the computer running the studio), or use *Choose files…* / *Choose folder…* in your browser (this also works from a phone). The studio finds:
+
+- **Guidelines text:** files named like design / brand / style / guidelines (else the first Markdown file). Rules-only files stay out of the prose.
+- **Rules:** checklist lines, bullets under headings like "Rules" or "Principles", and "must / never / always" bullets elsewhere. An ID written in the file (`CTA-001: …`) is kept; others get `IMPORT-nnn`. Each keeps its source file and line.
+- **Tokens:** flat or nested JSON (including `value` / `$value` style files) and CSS custom properties (`--accent: #0f766e`) from `.css` files or code blocks in Markdown.
+
+Tick what you want and press *Load into my draft*. Nothing is saved until you review the draft and press *Save new version*, so you can edit first. Items already in your draft come in unticked. The folder is remembered, so *Re-scan* picks up edits to the files. Reading a folder is only allowed from the computer running the studio.
+
+This is separate from **Review documents** (Settings), which feeds the audit rather than the guidelines.

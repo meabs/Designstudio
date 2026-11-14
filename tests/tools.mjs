@@ -9,12 +9,32 @@ async function api(p, data) { const r = await fetch(origin + '/api/' + p, data ?
 const until = async (fn, what, ms = 90000) => { const end = Date.now() + ms; for (;;) { const x = await fn(); if (x) return x; assert.ok(Date.now() < end, 'timed out waiting for ' + what); await new Promise(r => setTimeout(r, 400)); } };
 const docs = fs.mkdtempSync(path.join(os.tmpdir(), 'review-'));
 fs.writeFileSync(path.join(docs, 'legal.md'), '# Legal & compliance\n- [ ] Must include "Representative APR"\n- [ ] Never say "guaranteed approval"\n- [ ] Legal has approved the footer wording\n');
+const brand = fs.mkdtempSync(path.join(os.tmpdir(), 'brand-'));
+fs.writeFileSync(path.join(brand, 'DESIGN.md'), '# Acme Design\n\nBe calm and plain-spoken.\n\n## Principles\n- Explain why sensitive details are requested\n- Never use red for errors alone\n');
+fs.writeFileSync(path.join(brand, 'rules.md'), '# Rules\n- [ ] **CTA-001** Headlines must be under 8 words\n- Avoid jargon\n');
+fs.writeFileSync(path.join(brand, 'tokens.json'), JSON.stringify({ accent: '#0f766e', color: { surface: { $value: '#fafafa' } } }));
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true });
 const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage(); const errors = [];
 page.on('pageerror', e => errors.push('pageerror: ' + e.message)); page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push('console: ' + m.text()); });
 const step = async (name, fn) => { try { await fn(); console.log('ok  ' + name); } catch (e) { console.error('FAIL ' + name + '\n' + e.message); await page.screenshot({ path: '/tmp/tools-fail.png', fullPage: true }).catch(() => {}); await browser.close(); process.exit(1); } };
 let st = await api('state'); const project = st.project[0], board = st.board[0]; const base = `/projects/${project.id}`;
 
+await step('guidelines: import DESIGN.md, rules and tokens from a folder into the draft, then save a version', async () => {
+  const before = (await api('state')).context.length; await page.goto(`${origin}${base}/context`);
+  await page.locator('#import-folder').fill(brand); await page.locator('[data-action="scan-folder"]').click(); await page.locator('#import-result').getByText('DESIGN.md').first().waitFor();
+  const res = page.locator('#import-result'); assert.ok(await res.getByText('Headlines must be under 8 words').count()); assert.ok(await res.getByText('color-surface').count());
+  await page.locator('[data-action="import-apply"]').click();
+  assert.match(await page.locator('#guidelines').inputValue(), /Be calm and plain-spoken/); await page.locator('#rules table.rules').getByText('Headlines must be under 8 words').waitFor();
+  assert.match(await page.locator('#tokens-json').inputValue(), /"color-surface": "#fafafa"/);
+  assert.equal((await api('state')).context.length, before, 'nothing saved until you press save');
+  await page.locator('[data-action="save-context"]').click(); await until(async () => (await api('state')).context.length === before + 1, 'saved version');
+  const c = (await api('state')).context.at(-1); assert.ok(c.rules.some(r => r.description === 'Headlines must be under 8 words' && r.justification.startsWith('Imported from rules.md'))); assert.equal(c.tokens.accent, '#0f766e');
+  assert.equal((await api('state')).project[0].guidelines_folder, fs.realpathSync(brand), 'folder remembered');
+});
+await step('guidelines: choose files in the browser (works away from this computer)', async () => {
+  await page.goto(`${origin}${base}/context`); await page.locator('#import-files').setInputFiles([path.join(brand, 'DESIGN.md'), path.join(brand, 'tokens.json')]);
+  await page.locator('#import-result').getByText('accent').first().waitFor(); assert.equal(await page.locator('#import-result').getByText('Principles').count(), 0);
+});
 await step('settings: point the project at a folder of review documents', async () => {
   await page.goto(`${origin}${base}/settings/agents`); await page.locator('#review-folder').fill(docs); await page.locator('[data-action="save-review-folder"]').click();
   await page.getByText('legal.md').waitFor(); await page.getByText('3 criteria').waitFor();
