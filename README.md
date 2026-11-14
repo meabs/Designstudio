@@ -173,4 +173,4 @@ CI runs `make check` on every push. Add a coss component with `cd apps/ui && npx
 
 This is a proof of concept that is good enough to use daily on your own machine, not a hardened product. Notable limits: the audit is static (it reads delivered HTML and CSS, never renders them) and is evidence for a reviewer, not a compliance certification; agent self-reports and agent readings of your documents are unverified opinions; guideline import is heuristic; profiles are copies, not layers. The full list is in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
-No open-source licence has been chosen yet, so by default all rights are reserved.
+Released under the [MIT licence](LICENSE): free to use, modify and share. The agents you connect (Claude Code, Codex) and the promo video tooling have their own terms.

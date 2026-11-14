@@ -51,4 +51,4 @@ def configuration(agent,model,sandbox=None):
  env=['PATH','HOME','USER','LANG','LC_ALL','TERM','TMPDIR','SHELL','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']+{'codex':['CODEX_HOME','OPENAI_API_KEY'],'claude':['CLAUDE_CONFIG_DIR','ANTHROPIC_API_KEY'],'opencode':['OPENCODE_CONFIG']}.get(agent,[])
  real=os.path.dirname(os.path.realpath(installed['executable']))
  rw={'codex':['~/.codex'],'claude':['~/.claude','~/.claude.json'],'opencode':['~/.config/opencode','~/.local/share/opencode']}.get(agent,[])
- return dict(name=installed['name']+' / '+(model or 'agent default'),type='cli',agent=agent,model=model,executable=installed['executable'],args=args,timeout=300,env_allowlist=env,auto_retries=0,sandbox='bwrap' if sandbox else None,sandbox_ro=[real],sandbox_rw=rw)
+ return dict(name=installed['name']+' / '+(model or 'agent default'),type='cli',agent=agent,model=model,executable=installed['executable'],args=args,timeout=900,env_allowlist=env,auto_retries=0,sandbox='bwrap' if sandbox else None,sandbox_ro=[real],sandbox_rw=rw)

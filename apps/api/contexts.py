@@ -1,6 +1,6 @@
 """Projects and versioned design context (DESIGN.md, tokens, rules) with scope precedence."""
 
-import time
+import os, time
 from core import LOCK, allof, digest, get, save, uid
 
 RULES = [
@@ -226,8 +226,16 @@ def project(data):
 
 def seed():
     if not allof('runner'):
-        for label, style in [('Studio A', 'a'), ('Studio B', 'b')]:
-            save('runner', dict(id=uid(), name=label, type='fixture', style=style))
+        if os.environ.get('STUDIO_SEED_FIXTURES') == '1':
+            # Tests and offline demos only: deterministic template runners. A normal install starts with your installed coding agents.
+            for label, style in [('Studio A', 'a'), ('Studio B', 'b')]:
+                save('runner', dict(id=uid(), name=label, type='fixture', style=style))
+        else:
+            from local_agents import configuration, discover
+
+            for a in discover():
+                if a['id'] in ('claude', 'codex') and a['supported']:
+                    save('runner', dict(id=uid(), enabled=True, **configuration(a['id'], '')))
     if not allof('project'):
         p = project({'name': 'Credit Card Application', 'description': 'A clearer path to your next everyday card.'})
         save(

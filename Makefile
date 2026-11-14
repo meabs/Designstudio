@@ -14,7 +14,7 @@ run-lan:        ## same, but reachable from phones/laptops on your network (no l
 	@test -f apps/ui/dist/index.html || $(MAKE) ui-build
 	STUDIO_HOST=0.0.0.0 $(PY) apps/api/server.py
 test:           ## Python unit tests + UI unit tests and type check
-	$(PY) -m unittest discover -s tests
+	STUDIO_SEED_FIXTURES=1 $(PY) -m unittest discover -s tests
 	cd apps/ui && npx vitest run && npx tsc --noEmit
 check:          ## install + build the UI (catches type and bundling errors), then run every test
 	@$(MAKE) --no-print-directory ui-build
