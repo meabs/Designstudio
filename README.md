@@ -59,12 +59,13 @@ Design Studio puts that around the agents. Every run is a job with an **immutabl
 | ![Generate dialog with profiles, spread and rules-vs-free](docs/screenshots/readme/05-generate-profiles.png)<br /><sub>**Experiment.** Profiles, spread directions and rules-vs-free in one dialog.</sub> | ![Review with pinned comment](docs/screenshots/readme/03-review-pins.png)<br /><sub>**Review.** Pin feedback to an element; revise only that region.</sub> |
 | ![Audit tab with accessibility and document checks](docs/screenshots/readme/04-audit.png)<br /><sub>**Audit.** Accessibility checks and your own documents, run when you decide.</sub> | ![Import guidelines from a folder](docs/screenshots/readme/06-import-guidelines.png)<br /><sub>**Import.** Bring existing DESIGN.md, rules and tokens; review before saving.</sub> |
 | ![Decision log](docs/screenshots/readme/07-decision-log.png)<br /><sub>**Decision log.** Every approval and set-aside with its reason.</sub> | ![Prototype player](docs/screenshots/readme/08-prototype.png)<br /><sub>**Prototype.** An approved version becomes a clickable bundle.</sub> |
+| ![Edit tool with a selected heading, resize handles and the edit panel](docs/screenshots/readme/10-edit.png)<br /><sub>**Edit.** Select, resize, restyle and rearrange the live screen; save it as a new version.</sub> | |
 
 <p align="center"><img src="docs/screenshots/readme/09-phone.png" alt="The studio on a phone" width="260" /><br /><sub>The same studio on a phone over Wi-Fi.</sub></p>
 
 ## Quick start
 
-**Requirements:** Python 3.10+. Node 20+ and npm **once**, to build the UI (`make run` does it the first time). Google Chrome on `PATH` as `google-chrome` for rendered screenshot previews. Coding-agent CLIs (Claude Code, Codex) are optional and use their own existing login.
+**Requirements:** Python 3.10+. Node 20+ and npm **once**, to build the UI (`make run` does it the first time). Google Chrome on `PATH` as `google-chrome` for rendered screenshot previews. Coding-agent CLIs (Claude Code, Codex, OpenCode, GitHub Copilot CLI) are optional and use their own existing login.
 
 ```sh
 git clone https://github.com/meabs/Designstudio.git
@@ -72,7 +73,7 @@ cd Designstudio
 make run        # builds the UI on first run, then starts the server
 ```
 
-Open <http://localhost:5173>. On first start the studio adds any installed **Claude Code** and **Codex** as runners; add others, or change models, under **Settings → Agents & models**. Without an agent installed there is nothing to generate with (set `STUDIO_SEED_FIXTURES=1` for offline template runners). Data lives in `storage/` (SQLite plus generated files).
+Open <http://localhost:5173>. On first start the studio adds any installed **Claude Code** and **Codex** as runners; add others (OpenCode, GitHub Copilot CLI), or change models, under **Settings → Agents & models**. Without an agent installed there is nothing to generate with (set `STUDIO_SEED_FIXTURES=1` for offline template runners). Data lives in `storage/` (SQLite plus generated files).
 
 **Single-file build (no Python or Node needed to run it):** `./packaging/build.sh` produces `dist/designstudio` for the platform you build on (PyInstaller cannot cross-compile). Running it starts the studio and opens your browser; data is kept in `~/.local/share/designstudio` (or the macOS/Windows equivalent). Chrome and your agent CLIs are still needed on the machine. Only the Linux build has been tested.
 
@@ -102,7 +103,7 @@ The full walkthrough is in the **[User guide](docs/USER_GUIDE.md)**.
 | Runner | Notes |
 |---|---|
 | **Template (fixture)** | Offline and deterministic **sample output**: generic screens that use your screen names, show your brief as a lead paragraph, and apply your tokens and simple colour directives. It does not interpret the brief and says so on every screen. For tests and trying the workflow; use a coding agent for real design. |
-| **Claude Code, Codex** | Local CLIs through their existing authentication. Run inside a **bubblewrap filesystem sandbox** when available, with an environment allow-list. Each run has a timeout, automatic retry options and a full runner log. |
+| **Claude Code, Codex, OpenCode, GitHub Copilot CLI** | Local CLIs through their existing authentication. Run inside a **bubblewrap filesystem sandbox** when available, with an environment allow-list. Each run has a timeout, automatic retry options and a full runner log. |
 
 Agent output is untrusted: it is limited to an allow-list of file types, validated against the [runner contract](docs/RUNNER_CONTRACT.md), and its self-report is shown but never presented as verified.
 

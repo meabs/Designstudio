@@ -46,6 +46,15 @@ class StudioTest(unittest.TestCase):
   with patch.object(local_agents,'discover',return_value=[{'id':'codex','name':'Codex','supported':True,'executable':'/usr/bin/codex'}]):
    on=local_agents.configuration('codex','',sandbox=True); off=local_agents.configuration('codex','',sandbox=False)
   self.assertIn('danger-full-access',on['args']); self.assertEqual(on['sandbox'],'bwrap'); self.assertIn('workspace-write',off['args']); self.assertNotIn('danger-full-access',off['args']); self.assertIsNone(off['sandbox'])
+ def test_copilot_adapter_is_non_interactive_and_follows_the_sandbox_setting(self):
+  fake=[{'id':'copilot','name':'GitHub Copilot','supported':True,'executable':'/usr/bin/copilot'}]
+  with patch.object(local_agents,'discover',return_value=fake):
+   on=local_agents.configuration('copilot','claude-haiku-4.5',sandbox=True); off=local_agents.configuration('copilot','',sandbox=False)
+  for c in (on,off):
+   self.assertEqual(c['args'][:2],['--prompt','{prompt}']); self.assertIn('--no-ask-user',c['args']); self.assertNotIn('--allow-all',c['args']); self.assertNotIn('--yolo',c['args']); self.assertNotIn('--allow-all-urls',c['args'])
+  self.assertIn('--allow-all-tools',on['args']); self.assertIn('--model',on['args']); self.assertEqual(on['sandbox'],'bwrap'); self.assertIn('~/.copilot',on['sandbox_rw'])
+  self.assertEqual([a for a in off['args'] if a.startswith('--allow')],['--allow-tool=write']); self.assertNotIn('--model',off['args']); self.assertIsNone(off['sandbox'])
+  self.assertIn('COPILOT_GITHUB_TOKEN',on['env_allowlist'])
  def test_no_installed_agent(self):
   with patch.object(local_agents,'discover',return_value=[]):
    with self.assertRaises(ValueError):local_agents.configuration('codex','model')

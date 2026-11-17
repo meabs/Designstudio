@@ -4,7 +4,7 @@
 - Store typed JSON entities in SQLite; immutable context versions, job envelopes and variant directories preserve history. Approval pins the exact variant; revisions create child directories.
 - Run jobs in independent background threads and persist state/events. On restart interrupted jobs are marked failed rather than silently resumed. A durable worker queue and cancellation remain future work.
 - Built-in fixture directions use actual standalone HTML and native relative navigation. Chrome captures screenshots; screenshot failures are reported as not assessable.
-- Discover executables locally. Codex models come from its local cache, OpenCode models from its discovery command; other model IDs are manually entered. Do not invent a current model catalog or imply that cached models are accessible.
+- Discover executables locally. Codex models come from its local cache, OpenCode models from its discovery command; other model IDs (including GitHub Copilot CLI, which has no non-interactive model list) are manually entered. Do not invent a current model catalog or imply that cached models are accessible.
 - Agent selectors configure safe argument arrays; no shell interpolation or permission-bypass flags. Existing local authentication belongs to the CLI, not the studio.
 - Routes follow the design specification, while the initial HTTP mutation API uses concise action endpoints. The full specified REST API/OpenAPI is deferred.
 - This implementation is intended for trusted local coding agents, not hostile artifact ingestion or multi-user hosting.

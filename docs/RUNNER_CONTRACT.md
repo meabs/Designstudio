@@ -1,10 +1,10 @@
 # Local coding-agent runners
 
-The server discovers Codex, Claude Code, OpenCode, Gemini CLI, GitHub Copilot and Aider on PATH. Built-in invocation adapters currently support Codex, Claude Code and OpenCode. Other installed tools are displayed but disabled until an adapter is added. Existing CLI authentication is reused; no API credentials are requested by the UI.
+The server discovers Codex, Claude Code, OpenCode, Gemini CLI, GitHub Copilot and Aider on PATH. Built-in invocation adapters currently support Codex, Claude Code, OpenCode and GitHub Copilot CLI. Other installed tools are displayed but disabled until an adapter is added. Existing CLI authentication is reused; no API credentials are requested by the UI.
 
 Settings → Agents lets you choose an installed executable, choose a cached/discovered model or enter a model ID, and create independent configurations. Empty model means the CLI's configured default. Two configurations may use the same coding agent with different models.
 
-`apps/api/local_agents.py` owns discovery and argument mappings. Codex uses `exec --sandbox workspace-write --model MODEL`; Claude uses print mode with `acceptEdits`; OpenCode uses `run --model MODEL`. No shell command string is evaluated. Availability tests check executable presence, not authentication or model entitlement. CLI versions can vary; verify your installed version's flags.
+`apps/api/local_agents.py` owns discovery and argument mappings. Codex uses `exec --sandbox workspace-write --model MODEL`; Claude uses print mode with `acceptEdits`; OpenCode uses `run --model MODEL`; GitHub Copilot CLI uses `--prompt` with `--silent --no-ask-user --no-auto-update` (plus `--allow-all-tools --allow-all-paths` only inside the studio's filesystem sandbox, otherwise just `--allow-tool=write`; never `--allow-all-urls` or `--yolo`) and `--model MODEL`. Copilot reuses `copilot login` (token in the system credential store, or `~/.copilot`); `COPILOT_GITHUB_TOKEN`, `GH_TOKEN` and `GITHUB_TOKEN` are passed through if set. Copilot has no non-interactive model list, so enter the model ID by hand. No shell command string is evaluated. Availability tests check executable presence, not authentication or model entitlement. CLI versions can vary; verify your installed version's flags.
 
 Each job gets its own `storage/jobs/ID/` directory containing:
 

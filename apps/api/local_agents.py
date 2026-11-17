@@ -29,7 +29,7 @@ def discover():
     p=subprocess.run([executable,'models'],capture_output=True,text=True,timeout=8)
     if p.returncode==0: models=[s for s in p.stdout.splitlines() if '/' in s and len(s)<150]; source='opencode models'
    except (OSError,subprocess.TimeoutExpired): pass
-  result.append(dict(id=name,name={'codex':'Codex','claude':'Claude Code','opencode':'OpenCode','gemini':'Gemini CLI','copilot':'GitHub Copilot','aider':'Aider'}[name],executable=executable,models=models,model_source=source,supported=name in ['codex','claude','opencode']))
+  result.append(dict(id=name,name={'codex':'Codex','claude':'Claude Code','opencode':'OpenCode','gemini':'Gemini CLI','copilot':'GitHub Copilot','aider':'Aider'}[name],executable=executable,models=models,model_source=source,supported=name in ['codex','claude','opencode','copilot']))
  return result
 
 def configuration(agent,model,sandbox=None):
@@ -47,8 +47,12 @@ def configuration(agent,model,sandbox=None):
   # Agents often build screens with a small generator script, so inside our filesystem sandbox allow running interpreters
   # (they can only write the job folder). Without the sandbox keep it edit-only.
   args=['--print','--permission-mode','acceptEdits']+(['--allowedTools='+','.join(CLAUDE_RUN_TOOLS)] if sandbox else [])+(['--model',model] if model else [])+['{prompt}']
+ elif agent=='copilot':
+  # Non-interactive prompt mode. Inside our filesystem sandbox the agent may run tools anywhere it can see (it can only write the job folder);
+  # without it, only file writes are pre-approved and paths stay limited to the working folder. Never asks questions, never self-updates.
+  args=['--prompt','{prompt}','--silent','--no-ask-user','--no-auto-update']+(['--allow-all-tools','--allow-all-paths'] if sandbox else ['--allow-tool=write'])+(['--model',model] if model else [])
  else: args=['run']+(['--model',model] if model else [])+['{prompt}']
- env=['PATH','HOME','USER','LANG','LC_ALL','TERM','TMPDIR','SHELL','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']+{'codex':['CODEX_HOME','OPENAI_API_KEY'],'claude':['CLAUDE_CONFIG_DIR','ANTHROPIC_API_KEY'],'opencode':['OPENCODE_CONFIG']}.get(agent,[])
+ env=['PATH','HOME','USER','LANG','LC_ALL','TERM','TMPDIR','SHELL','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']+{'codex':['CODEX_HOME','OPENAI_API_KEY'],'claude':['CLAUDE_CONFIG_DIR','ANTHROPIC_API_KEY'],'opencode':['OPENCODE_CONFIG'],'copilot':['COPILOT_HOME','COPILOT_GITHUB_TOKEN','GH_TOKEN','GITHUB_TOKEN']}.get(agent,[])
  real=os.path.dirname(os.path.realpath(installed['executable']))
- rw={'codex':['~/.codex'],'claude':['~/.claude','~/.claude.json'],'opencode':['~/.config/opencode','~/.local/share/opencode']}.get(agent,[])
+ rw={'codex':['~/.codex'],'claude':['~/.claude','~/.claude.json'],'opencode':['~/.config/opencode','~/.local/share/opencode'],'copilot':['~/.copilot']}.get(agent,[])
  return dict(name=installed['name']+' / '+(model or 'agent default'),type='cli',agent=agent,model=model,executable=installed['executable'],args=args,timeout=900,env_allowlist=env,auto_retries=0,sandbox='bwrap' if sandbox else None,sandbox_ro=[real],sandbox_rw=rw)
