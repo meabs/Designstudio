@@ -5,7 +5,7 @@ which contract stage passes or fails. Uses a temporary storage directory; never 
 
 --guidance runs a second job with a changed accent token and checks the output actually reflects it
 (guidance must change generation, not just be displayed)."""
-import argparse, re, sys, tempfile, time, json
+import argparse, re, sys, tempfile, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import server as s, local_agents, jobs
@@ -54,7 +54,6 @@ def main():
             print(f"\n== guidance check: output differs={differs}, new accent #c2185b present={used}"); ok = ok and differs and used
         else: ok = False
     if ok and a.mix:
-        import subprocess
         t = time.time(); jm = s.launch(dict(board_id=b['id'], brief=b['brief'], runner_ids=[runner['id']]), 'generate_board', p['id'])[0]
         okm = report('second generation (for mixing)', wait(jm['id'], a.timeout), t)
         if okm:
@@ -86,7 +85,7 @@ def main():
                 print(f"\n== region check: text changed={changed}, scope check passed={bool(scope) and all(c['outcome']=='pass' for c in scope)}"); ok = ok and changed and bool(scope) and all(c['outcome'] == 'pass' for c in scope)
             else: ok = False
     if ok and a.references:
-        import base64, subprocess, os
+        import base64
         word = 'PINEAPPLE-42'; html = Path(tmp.name) / 'ref.html'; png = Path(tmp.name) / 'ref.png'
         html.write_text(f'<body style="margin:0;width:700px;height:300px;background:#fffbe6;display:grid;place-items:center;font:700 64px sans-serif;color:#222">{word}</body>')
         jobs.chrome_screenshot('doctor-ref', html, png, size=(700, 300))

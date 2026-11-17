@@ -5,12 +5,11 @@ conformance. Criteria from the designer's own markdown documents are either chec
 document says what must or must not appear) or listed for human review with the source file and line.
 """
 
-import re, time, html as htmllib
+import re, time
 from html.parser import HTMLParser
-from pathlib import Path
 import core
 from contexts import current_context
-from core import allof, check_folder, digest, get, save, uid, safe_path
+from core import check_folder, digest, get, save, uid, safe_path
 
 MAX_DOCS = 60
 MAX_DOC_BYTES = 200_000

@@ -161,7 +161,9 @@ Design rationale is recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 ## Development
 
 ```sh
-make check       # builds the UI (type-checks and bundles), then Python tests, UI unit tests and tsc
+make check       # builds the UI (type-checks and bundles), lint, Python tests, UI unit tests and tsc, then the browser test
+make lint        # dependency-free Python lint (syntax, unused imports, duplicate names) plus tsc
+make compare AGENTS="claude codex copilot"   # same brief through each real agent: time, tokens (Codex only), checks, screenshots
 make ui-dev      # UI hot reload on :5174 (run `make run` for the API on :5173 first)
 ```
 

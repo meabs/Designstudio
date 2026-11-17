@@ -1,6 +1,6 @@
 # One-command workflow for the POC (no Docker, no pip/npm needed to run).
 PY ?= python3
-.PHONY: run run-lan ui-install ui-build ui-dev test e2e check doctor backup
+.PHONY: run run-lan ui-install ui-build ui-dev lint test e2e check doctor compare backup
 ui-install:     ## install UI build dependencies (Node 20+)
 	cd apps/ui && npm install --no-audit --no-fund
 ui-build:       ## build the React UI into apps/ui/dist
@@ -13,6 +13,9 @@ run:            ## start the studio on http://localhost:5173 (builds the UI firs
 run-lan:        ## same, but reachable from phones/laptops on your network (no login!)
 	@test -f apps/ui/dist/index.html || $(MAKE) ui-build
 	STUDIO_HOST=0.0.0.0 $(PY) apps/api/server.py
+lint:           ## dependency-free Python lint (syntax, unused imports, duplicate names) plus the UI type check
+	$(PY) apps/api/lint.py
+	cd apps/ui && npx tsc --noEmit
 test:           ## Python unit tests + UI unit tests and type check
 	STUDIO_SEED_FIXTURES=1 $(PY) -m unittest discover -s tests
 	cd apps/ui && npx vitest run && npx tsc --noEmit
@@ -20,9 +23,12 @@ e2e:            ## browser test for direct editing (skips itself if Playwright o
 	@bash tests/run_e2e.sh
 check:          ## install + build the UI (catches type and bundling errors), then run every test, including the browser test when it can run
 	@$(MAKE) --no-print-directory ui-build
+	@$(MAKE) --no-print-directory lint
 	@$(MAKE) --no-print-directory test
 	@$(MAKE) --no-print-directory e2e
 doctor:         ## real-agent contract check: make doctor AGENT=claude
 	$(PY) apps/api/doctor.py $(AGENT) --guidance --references --region --mix
+compare:        ## same brief through several real agents, with time, tokens and checks: make compare AGENTS="claude codex copilot"
+	$(PY) apps/api/compare.py $(AGENTS)
 backup:         ## consistent snapshot of studio.db + files into backups/
 	$(PY) apps/api/backup.py
