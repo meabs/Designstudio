@@ -16,6 +16,7 @@ import { JobProgress, usageLine, usageNote } from '@/components/app/progress';
 import { jobAction, openLive, openRef, pinModal, pinEdit, pinDelete, runAction, blindPick, blindReveal, acceptRevision, revertRevision } from '@/actions';
 import { nativeSelect } from '@/actions';
 import { Inspector } from './inspector';
+import { EditCanvas } from './editor';
 import { cn } from '@/lib/utils';
 
 const JOB_LABEL: Record<string, string> = { queued: 'Queued', running: 'Running', succeeded: 'Succeeded', failed: 'Failed', timed_out: 'Timed out', cancelled: 'Cancelled' };
@@ -59,7 +60,7 @@ export function useCanvasKeys() {
       const path = location.pathname.split('/').filter(Boolean); const onBoard = path[2] === 'boards' && path[3];
       if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && onBoard) {
         const k = e.key; const z = ui.get().zoom; const mode = path[4] || '';
-        if (k === 'v' || k === 'V') return ui.set({ tool: 'move' }); if (k === 'c' || k === 'C') return ui.set({ tool: 'comment' });
+        if (k === 'v' || k === 'V') return ui.set({ tool: 'move' }); if (k === 'c' || k === 'C') return ui.set({ tool: 'comment' }); if (k === 'e' || k === 'E') return ui.set({ tool: 'edit' });
         if (k === '+' || k === '=') return setZoom(z + 10); if (k === '-') return setZoom(z - 10); if (k === '0') return setZoom(100); if (k === '1') return setZoom(fitZoom(mode));
         if (k === 'Escape' && ui.get().activePin) return ui.set({ activePin: '' });
       }
@@ -248,7 +249,7 @@ function RegionOverlay({ shown, screen, ids, fr }: { shown: any; screen: string;
 function ReviewView({ b, vs, v }: { b: any; vs: any[]; v: any }) {
   const { r } = useCurrent(); const data = useData(); const s = useUi((x) => x);
   if (!v) return <div className="canvas p-6"><Empty title="Nothing to review" text="Generate variations first." /></div>;
-  const parent = data.variant.find((x) => x.id === v.parent_id); const showBefore = s.showBefore && parent; const shown = showBefore ? parent : v; const commenting = s.tool === 'comment' && !showBefore;
+  const parent = data.variant.find((x) => x.id === v.parent_id); const showBefore = s.showBefore && parent; const shown = showBefore ? parent : v; const commenting = s.tool === 'comment' && !showBefore; const editing = s.tool === 'edit' && !showBefore;
   const view = hasPhoneView(b) ? s.reviewView : 'd'; const fr = frameOf(b, view);
   const pins = data.annotation.filter((a) => a.variant_id === v.id && a.screen === s.screen && (a.view || 'd') === view); const changed = v.changed_screens || []; const open = pins.find((a) => a.id === s.activePin);
   const num = (a: any) => data.annotation.filter((x) => x.variant_id === v.id).findIndex((x) => x.id === a.id) + 1;
@@ -269,7 +270,7 @@ function ReviewView({ b, vs, v }: { b: any; vs: any[]; v: any }) {
         {parent && <><SegmentedControl role="group" aria-label="Before and after"><SegmentedControlItem data-action="show-after" aria-current={showBefore ? undefined : 'page'} onClick={() => ui.set({ showBefore: false })}>After (v{v.version})</SegmentedControlItem><SegmentedControlItem data-action="show-before" aria-current={showBefore ? 'page' : undefined} onClick={() => ui.set({ showBefore: true })}>Before (v{parent.version})</SegmentedControlItem></SegmentedControl>
           <Button size="sm" variant="outline" render={<Link href={`${boardPath(r, b, 'compare')}?left=${parent.id}&right=${v.id}`} />}><Ic name="columns" size={13} /> Side by side</Button></>}
         {regions && <><label className="flex items-center gap-1.5 text-xs font-normal"><input type="checkbox" data-show-regions checked={s.showRegions} onChange={(e) => ui.set({ showRegions: e.target.checked })} /> Show changed regions</label>{regions.outside ? <Tag kind="fail">Changes outside identified elements</Tag> : null}</>}
-        <span className="grow text-xs text-muted-foreground">{v.approved ? 'Approved and locked: feedback starts a new revision.' : commenting ? 'Comment tool: click the screen to drop a pin.' : showBefore ? 'Before view is read-only.' : 'Move tool: select pins. Press C to comment.'}</span>
+        <span className="grow text-xs text-muted-foreground">{v.approved ? 'Approved and locked: feedback starts a new revision.' : editing ? 'Edit tool: click an element, change it in the panel, then save as a new version.' : commenting ? 'Comment tool: click the screen to drop a pin.' : showBefore ? 'Before view is read-only.' : 'Move tool: select pins. Press C to comment.'}</span>
       </div>
       <div className="reviewstage flex items-start gap-4 max-md:flex-col max-md:items-stretch">
         <div className="filmcol flex gap-2 md:w-24 md:flex-col" role="group" aria-label="Screens">{v.manifest.screens.map((sc: any) => <button key={sc.id} className={cn('film flex w-24 shrink-0 flex-col gap-1 rounded-lg border bg-background p-1.5 text-xs', sc.id === s.screen && 'on ring-2 ring-foreground')} data-screen={sc.id} aria-label={sc.title} onClick={() => ui.set({ screen: sc.id })}><img src={img(shown, sc.id)} alt="" loading="lazy" className="aspect-[3/4] w-full rounded object-cover object-top" /><span>{sc.title}{changed.includes(sc.id) ? ' •' : ''}</span></button>)}</div>
@@ -277,9 +278,11 @@ function ReviewView({ b, vs, v }: { b: any; vs: any[]; v: any }) {
           <div className="fname mb-1.5 text-xs"><span>{b.screens[Number(s.screen)]}</span> <span className="muted text-muted-foreground">· {shown.runner_name} v{shown.version}</span></div>
           <div className={cn('review-area relative mx-auto max-w-full select-none', commenting ? 'commenting cursor-crosshair' : '')} id="pin-area" role="button" tabIndex={0} aria-label="Screen preview. Press Enter to add a feedback pin." style={{ width: Math.round((reviewBase(b, view) * s.zoom) / 100) }}
             onClick={onArea} onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); if (!showBefore) pinModal(0.5, 0.5, view); } }}>
-            <Thumb src={img(shown, s.screen, view)} alt={`${b.screens[Number(s.screen)]} · ${shown.runner_name} v${shown.version}${view === 'm' ? ' · phone view' : ''}`} className="block w-full rounded border bg-white" />
-            {regions && s.showRegions && <RegionOverlay shown={shown} screen={s.screen} ids={regions.elements || []} fr={fr} />}
-            {!showBefore && pins.map((a) => <span key={a.id} className={cn('pin absolute grid size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer place-items-center rounded-full border-2 border-background bg-foreground text-[11px] text-background shadow-md', a.status === 'applied' && 'applied bg-muted-foreground', s.activePin === a.id && 'focus ring-2 ring-ring')} data-pin={a.id} role="button" tabIndex={0} aria-label={`Comment ${num(a)}`} title={a.comment} style={{ left: `${a.x * 100}%`, top: `${a.y * 100}%` }} onClick={(e) => { e.stopPropagation(); ui.set({ activePin: a.id }); }}><b>{num(a)}</b></span>)}
+            {editing ? <EditCanvas v={shown} screen={s.screen} fr={fr} width={Math.round((reviewBase(b, view) * s.zoom) / 100)} /> : (
+  <Thumb src={img(shown, s.screen, view)} alt={`${b.screens[Number(s.screen)]} · ${shown.runner_name} v${shown.version}${view === 'm' ? ' · phone view' : ''}`} className="block w-full rounded border bg-white" />
+            )}
+            {!editing && regions && s.showRegions && <RegionOverlay shown={shown} screen={s.screen} ids={regions.elements || []} fr={fr} />}
+            {!showBefore && !editing && pins.map((a) => <span key={a.id} className={cn('pin absolute grid size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer place-items-center rounded-full border-2 border-background bg-foreground text-[11px] text-background shadow-md', a.status === 'applied' && 'applied bg-muted-foreground', s.activePin === a.id && 'focus ring-2 ring-ring')} data-pin={a.id} role="button" tabIndex={0} aria-label={`Comment ${num(a)}`} title={a.comment} style={{ left: `${a.x * 100}%`, top: `${a.y * 100}%` }} onClick={(e) => { e.stopPropagation(); ui.set({ activePin: a.id }); }}><b>{num(a)}</b></span>)}
             {!showBefore && open && (
               <div className="pop absolute z-20 w-60 rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg" role="dialog" aria-label={`Comment ${num(open)}`} onClick={(e) => e.stopPropagation()} style={{ left: `${Math.min(open.x * 100, 62)}%`, ...(open.y > 0.55 ? { bottom: `calc(${(1 - open.y) * 100}% + 36px)` } : { top: `calc(${open.y * 100}% + 18px)` }) }}>
                 <div className="flex items-center justify-between"><strong className="text-sm">Comment {num(open)}</strong><span className="flex gap-0.5">{open.status !== 'applied' && <><Button variant="ghost" size="icon-xs" data-pin-edit={open.id} aria-label="Edit comment" onClick={() => pinEdit(open.id)}><Ic name="edit" size={13} /></Button><Button variant="ghost" size="icon-xs" data-pin-delete={open.id} aria-label="Delete comment" onClick={() => pinDelete(open.id)}><Ic name="trash" size={13} /></Button></>}<Button variant="ghost" size="icon-xs" data-pin-close aria-label="Close" onClick={() => ui.set({ activePin: '' })}><Ic name="x" size={13} /></Button></span></div>

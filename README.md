@@ -43,6 +43,7 @@ Design Studio puts that around the agents. Every run is a job with an **immutabl
 | **Guideline profiles** | Keep several named, separately versioned sets of `DESIGN.md`, rules and tokens per project, and run every agent under each to compare. |
 | **Bring your own files** | Import `DESIGN.md`, rules files and token files (JSON or CSS variables) from a folder or the browser. Review the draft, then save a version. No pasting. |
 | **Live visibility** | Watch each agent's progress, screens written, elapsed time and usage while it runs, with a time and cost estimate before you start. |
+| **Edit directly** | The **Edit** tool (E) puts the live screen in the review canvas. Click any element, change its text, colours, type, radius, padding, opacity or visibility (project tokens offered as swatches), then save as a new child version. No agent run, the parent is never modified, and checks, region diff and accept/revert apply as for any revision. |
 | **Pin, don't prompt** | Pin feedback on a screen element. Revisions can be limited to the pinned region, and the studio checks that nothing else changed. A revision is a new child version you accept or revert. |
 | **Audit on demand** | A manual audit runs accessibility checks (WCAG-referenced) plus checklists from **your own Markdown documents** (legal, design review). An optional agent reading of those documents is always labelled unverified. |
 | **Decide with a trail** | Approve or set aside with a reason, share the decision log as Markdown, and build an immutable, clickable prototype with a read-only share link. |
@@ -146,7 +147,7 @@ tests/   unittest suite, browser end-to-end scripts
 promo/   Remotion project and recording scripts for the tour video
 ```
 
-**API modules** (`apps/api/`): `server.py` (entry point and facade), `core` (storage, ids, logging), `contexts` (projects, versioned guidance, profiles), `fixture`, `regions`, `validation`, `jobs` (queue, workers, sandbox, retries), `references`, `research`, `boards` (launch, overrides, blind A/B), `prototypes`, `audit`, `importer`, `sharing`, `web` (HTTP), plus `local_agents`, `doctor`, `backup`. Dependencies point one way.
+**API modules** (`apps/api/`): `server.py` (entry point and facade), `core` (storage, ids, logging), `contexts` (projects, versioned guidance, profiles), `fixture`, `regions`, `validation`, `jobs` (queue, workers, sandbox, retries), `references`, `research`, `boards` (launch, overrides, blind A/B), `prototypes`, `edits` (direct edits), `audit`, `importer`, `sharing`, `web` (HTTP), plus `local_agents`, `doctor`, `backup`. Dependencies point one way.
 
 **UI** (`apps/ui/`): `src/lib` (store, router, pure logic with tests), `src/components/ui` (coss components, copied in so they are editable), `src/components/app` (shell, dialogs, progress), `src/views`, `src/tools.tsx` (audit, profiles, import and the other designer tools), `src/actions.tsx`. Node is needed only to build; the running studio has no Node dependency.
 
@@ -166,6 +167,7 @@ npm install --no-save @playwright/test
 STUDIO_UNSAFE_TEST_RUNNERS=1 STUDIO_FOLDER_ROOTS=/tmp STUDIO_STORAGE=$(mktemp -d) PORT=5199 python3 apps/api/server.py &
 STUDIO_URL=http://localhost:5199 node tests/browser.mjs   # core workflow
 STUDIO_URL=http://localhost:5199 node tests/tools.mjs     # designer tools
+STUDIO_URL=http://localhost:5199 node tests/edit.mjs      # direct editing (needs STUDIO_SEED_FIXTURES=1 on the server)
 ```
 
 CI runs `make check` on every push. Add a coss component with `cd apps/ui && npx shadcn@latest add @coss/<name>`.

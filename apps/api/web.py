@@ -8,6 +8,7 @@ from boards import blind_choice, conflict_preview, create_board, hidden_job_file
 from contexts import context, profile_create, profile_delete, profile_update, project, seed
 from core import LOCK, ROOT, SHARE_PORT, STARTED, allof, db, get, log, safe_path, save, setup_logging, uid
 from jobs import JOBQ, MAX_JOBS, job_progress, WORKERS, cancel_job, recover_jobs, retry_job, start_workers, stop_workers
+from edits import manual_edit
 from prototypes import approve, mix_variants, set_aside, set_review_state
 from importer import parse_files, read_folder
 from audit import apply_style, audit_review, audit_variant, extract_style, launch_doc_review, read_review_folder
@@ -450,6 +451,8 @@ class Handler(SimpleHTTPRequestHandler):
                 result = blind_choice(d['board_id'], d.get('variant_id'), d.get('reason', ''))
             elif action == 'mix':
                 result = mix_variants(d['board_id'], d.get('picks'))
+            elif action == 'manual-edit':
+                result = manual_edit(d['variant_id'], d.get('edits'), d.get('note', ''))
             elif action == 'share-create':
                 result = share_create(d['prototype_id'], d.get('hours'))
             elif action == 'share-revoke':

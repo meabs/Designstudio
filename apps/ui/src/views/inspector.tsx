@@ -11,6 +11,7 @@ import { frameOf } from '@/lib/frame';
 import { ProfileTag, AuditTab, RuleBreaks, styleModal, statesModal, setAsideModal, twinLink } from '@/tools';
 import { refresh } from '@/lib/store';
 import { mergeModal, CutOff, AskList } from '@/assist';
+import { EditPanel } from './editor';
 import { cn } from '@/lib/utils';
 
 const OUTCOME: Record<string, string> = { pass: 'Passed deterministic checks', fail: 'Failed deterministic checks', not_assessable: 'Not assessable (missing instrumentation)', review: 'Needs designer review' };
@@ -34,6 +35,7 @@ export function Inspector() {
   const twin = twinLink(v); const job = data.job.find((j) => j.id === v.job_id); const ro = job?.context?.run_overrides; const rep = job?.agent_report;
 
   const design = <>
+    {s.tool === 'edit' && <EditPanel v={v} tokens={v.applied_tokens || vctx?.tokens || {}} />}
     <Block><div className="insp-layer mb-2 flex items-center gap-2.5"><Ic name="frame" size={14} /><div><strong className="text-sm">{screenTitle}</strong><div className="text-xs text-muted-foreground">{v.runner_name} · v{v.version}</div></div></div><Tag kind={kind}>{label}</Tag></Block>
     <Block title="Frame"><Prop k="Width">{frameOf(b).w}</Prop><Prop k="Height">{frameOf(b).h}</Prop><Prop k="Version">v{v.version}</Prop>{profilesOf(data.project.find((x) => x.id === v.project_id)).length > 1 && !(b.blind && !b.revealed) && <Prop k="Profile">{profileOfVariant(v, data).name}</Prop>}<Prop k="Context"><span className="font-mono text-xs">v{ctxVersion(vctx)} · {fmtHash(vctx?.hash)}</span></Prop></Block>
     {colors.length > 0 && <Block title={`Fill · tokens${v.applied_tokens ? ' applied' : ''}`}>{colors.map(([k, val]) => <div key={k} className="fillrow flex h-7 items-center gap-2 text-[13px]"><span className="swatch size-3.5 rounded border" style={{ background: String(val) }} /><span>{k}</span><span className="ml-auto font-mono text-xs text-muted-foreground">{String(val).toUpperCase()}</span></div>)}</Block>}

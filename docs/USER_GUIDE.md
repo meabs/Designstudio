@@ -129,3 +129,9 @@ The chosen target is passed to every agent in the task text. Boards can have **2
 **Cut-off runs are kept.** If an agent runs out of time after writing every screen and the manifest, the work is kept and marked **Cut off** instead of being thrown away. Review it and use Revise to finish any polish. If the screens or manifest are missing, the run still counts as timed out.
 
 **Developer hand-off.** In the player, *Developer hand-off* downloads a clean zip: `site/` (static HTML, CSS and JS, open `index.html`), `design/` (the guidelines, `tokens.json`, `tokens.css` and `rules.json` it was built to) and a README. It does not name the agent, and it states that the automated checks are structural, not a compliance certification. (*Export ZIP* is still there for the raw prototype folder.)
+
+## Editing a screen directly
+
+Pick the **Edit** tool (pencil, or press **E**) in Review. The screen becomes live: hover to outline an element, click to select it. In the Design tab you can change its text (when it has no child elements), text colour, background, font size, weight, alignment, radius, padding, opacity and visibility. Your project's colour tokens appear as swatches. Changes show immediately and stay a draft.
+
+Press **Save as new version** to create a child version with a Manual edit check. It is pending like any revision: accept or revert it, compare it with its parent, or keep revising by pin. **Discard** drops the draft. No agent runs and the original is never modified. Limits are listed in KNOWN_LIMITATIONS.md.

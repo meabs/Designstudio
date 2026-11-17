@@ -43,7 +43,7 @@ export async function rescanAgents() { dataStore.set({ agents: await api('local-
 export type Draft = { markdown: string; tokens: string; rules: any[] };
 export const ui = createStore({
   screen: '0', selectedVariant: '', device: (typeof matchMedia === 'function' && matchMedia('(max-width:767px)').matches ? 'mobile' : 'desktop') as 'desktop' | 'mobile', zoom: 100,
-  showReverted: false, showBefore: false, activePin: '', inspTab: 'design' as 'design' | 'checks' | 'comments' | 'audit', tool: 'comment' as 'comment' | 'move',
+  showReverted: false, showBefore: false, activePin: '', inspTab: 'design' as 'design' | 'checks' | 'comments' | 'audit', tool: 'comment' as 'comment' | 'move' | 'edit',
   regionOnly: true, showRegions: true, histFilter: 'all', roundState: {} as Record<string, boolean>, fitPending: true, scrollTo: '',
   draft: null as Draft | null, draftFor: '', viewProfile: '', genProfile: '', reviewView: 'd' as 'd' | 'm', busy: false, playerFile: '' as string,
 });

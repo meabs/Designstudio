@@ -32,6 +32,7 @@ export function TopBar() {
       {review && (
         <SegmentedControl role="group" aria-label="Tool" className="toolseg shrink-0">
           <SegmentedControlItem data-tool="move" aria-pressed={tool === 'move'} aria-current={tool === 'move' ? 'page' : undefined} title="Move (V)" aria-label="Move tool" onClick={() => ui.set({ tool: 'move' })}><Ic name="cursor" size={14} /></SegmentedControlItem>
+          <SegmentedControlItem data-tool="edit" aria-pressed={tool === 'edit'} aria-current={tool === 'edit' ? 'page' : undefined} title="Edit (E)" aria-label="Edit tool" onClick={() => ui.set({ tool: 'edit' })}><Ic name="edit" size={14} /></SegmentedControlItem>
           <SegmentedControlItem data-tool="comment" aria-pressed={tool === 'comment'} aria-current={tool === 'comment' ? 'page' : undefined} title="Comment (C)" aria-label="Comment tool" onClick={() => ui.set({ tool: 'comment' })}><Ic name="comment" size={14} /></SegmentedControlItem>
         </SegmentedControl>
       )}

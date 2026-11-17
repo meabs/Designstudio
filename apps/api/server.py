@@ -16,6 +16,7 @@ from validation import *
 from jobs import *
 from jobs import _execute
 from prototypes import *
+from edits import *
 from references import *
 from research import *
 from boards import *
