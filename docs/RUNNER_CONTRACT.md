@@ -1,6 +1,6 @@
 # Local coding-agent runners
 
-The server discovers Cursor Agent (`cursor-agent` / `agent`), Codex, Claude Code, OpenCode, Gemini CLI, GitHub Copilot and Aider on PATH. Built-in invocation adapters currently support Cursor Agent, Codex, Claude Code, OpenCode and GitHub Copilot CLI. Other installed tools are displayed but disabled until an adapter is added. Existing CLI authentication is reused; no API credentials are requested by the UI.
+The server discovers Cursor Agent (`cursor-agent`), Codex, Claude Code, OpenCode, Gemini CLI, GitHub Copilot and Aider on PATH. Built-in invocation adapters currently support Cursor Agent, Codex, Claude Code, OpenCode and GitHub Copilot CLI. Other installed tools are hidden from the Settings list until an adapter is added. Existing CLI authentication is reused; no API credentials are requested by the UI.
 
 Settings → Agents lets you choose an installed executable, choose a cached/discovered model or enter a model ID, and create independent configurations. Empty model means the CLI's configured default (for Cursor Agent that is Auto). Two configurations may use the same coding agent with different models.
 

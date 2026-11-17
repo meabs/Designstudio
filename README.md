@@ -74,7 +74,7 @@ cd Designstudio
 make run        # builds the UI on first run, then starts the server
 ```
 
-Open <http://localhost:5173>. On first start the studio adds any installed **Claude Code**, **Codex**, **GitHub Copilot CLI** and **Cursor Agent** (`cursor-agent` / `agent`) as runners; add OpenCode, or change models, under **Settings → Agents & models**. The agent list shows only tools that are installed on your PATH and that the studio can run, so tools without an adapter (Gemini CLI, Aider) are hidden. Without an agent installed there is nothing to generate with (set `STUDIO_SEED_FIXTURES=1` for offline template runners). Data lives in `storage/` (SQLite plus generated files).
+Open <http://localhost:5173>. On first start the studio adds any installed **Claude Code**, **Codex**, **GitHub Copilot CLI** and **Cursor Agent** (`cursor-agent`) as runners; add OpenCode, or change models, under **Settings → Agents & models**. The agent list shows only tools that are installed on your PATH and that the studio can run, so tools without an adapter (Gemini CLI, Aider) are hidden. Without an agent installed there is nothing to generate with (set `STUDIO_SEED_FIXTURES=1` for offline template runners). Data lives in `storage/` (SQLite plus generated files).
 
 **Single-file build (no Python or Node needed to run it):** `./packaging/build.sh` produces `dist/designstudio` for the platform you build on (PyInstaller cannot cross-compile). Running it starts the studio and opens your browser; data is kept in `~/.local/share/designstudio` (or the macOS/Windows equivalent). Chrome and your agent CLIs are still needed on the machine. Only the Linux build has been tested.
 
@@ -106,7 +106,7 @@ The full walkthrough is in the **[User guide](docs/USER_GUIDE.md)**.
 | **Template (fixture)** | Offline and deterministic **sample output**: generic screens that use your screen names, show your brief as a lead paragraph, and apply your tokens and simple colour directives. It does not interpret the brief and says so on every screen. For tests and trying the workflow; use a coding agent for real design. |
 | **Claude Code, Codex, OpenCode, GitHub Copilot CLI, Cursor Agent** | Local CLIs through their existing authentication. Run inside a **bubblewrap filesystem sandbox** when available, with an environment allow-list. Each run has a timeout, automatic retry options and a full runner log. |
 
-**Cursor Agent:** install with `curl https://cursor.com/install -fsS | bash` (puts `cursor-agent` / `agent` on PATH). Authenticate with `export CURSOR_API_KEY=…` (from the Cursor dashboard) or `agent login`. Empty model uses Cursor Auto. Contract check: `make doctor AGENT=cursor`.
+**Cursor Agent:** install with `curl https://cursor.com/install -fsS | bash` (puts `cursor-agent` on PATH). Authenticate with `export CURSOR_API_KEY=…` (from the Cursor dashboard) or `cursor-agent login`. Empty model uses Cursor Auto. Contract check: `make doctor AGENT=cursor`.
 
 Agent output is untrusted: it is limited to an allow-list of file types, validated against the [runner contract](docs/RUNNER_CONTRACT.md), and its self-report is shown but never presented as verified.
 
