@@ -1,4 +1,7 @@
 storage/
+storage-review/
+.venv-review/
+.venv/
 __pycache__/
 *.pyc
 node_modules/
