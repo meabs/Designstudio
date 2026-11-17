@@ -130,6 +130,10 @@ The chosen target is passed to every agent in the task text. Boards can have **2
 
 **Developer hand-off.** In the player, *Developer hand-off* downloads a clean zip: `site/` (static HTML, CSS and JS, open `index.html`), `design/` (the guidelines, `tokens.json`, `tokens.css` and `rules.json` it was built to) and a README. It does not name the agent, and it states that the automated checks are structural, not a compliance certification. (*Export ZIP* is still there for the raw prototype folder.)
 
+## Web search in research
+
+On the Research page tick **Allow web search** to let the research agent search and open pages for that run. It is off by default and only applies to research, never to screen generation. Cited pages appear as sources with their URLs, marked as reported by the agent and unverified: open a source before you rely on it.
+
 ## Editing a screen directly
 
 Pick the **Edit** tool (pencil, or press **E**) in Review. The screen becomes live: hover to outline an element, click to select it, shift-click to select several. Changes show immediately and stay a draft until you save. The draft is kept in this browser and in the studio, so it follows you to another browser.

@@ -56,3 +56,16 @@ def configuration(agent,model,sandbox=None):
  real=os.path.dirname(os.path.realpath(installed['executable']))
  rw={'codex':['~/.codex'],'claude':['~/.claude','~/.claude.json'],'opencode':['~/.config/opencode','~/.local/share/opencode'],'copilot':['~/.copilot']}.get(agent,[])
  return dict(name=installed['name']+' / '+(model or 'agent default'),type='cli',agent=agent,model=model,executable=installed['executable'],args=args,timeout=900,env_allowlist=env,auto_retries=0,sandbox='bwrap' if sandbox else None,sandbox_ro=[real],sandbox_rw=rw)
+
+def web_args(runner, args):
+ """Arguments that let a research run use the agent's own web tools. Off unless the designer switches it on for that run."""
+ agent=runner.get('agent')
+ if agent=='codex': return ['--search']+list(args)  # a global flag: it goes before the "exec" sub-command
+ if agent=='claude':
+  out=[]; done=False
+  for a in args:
+   if a.startswith('--allowedTools='): a=a+',WebSearch,WebFetch'; done=True
+   out.append(a)
+  return out if done else ['--allowedTools=WebSearch,WebFetch']+out
+ if agent=='copilot': return list(args)+['--allow-all-urls']
+ raise ValueError('Web search is not available for this agent')

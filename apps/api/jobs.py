@@ -99,19 +99,54 @@ def run_cli(command, out, timeout, j, runner=None):
             stderr=subprocess.STDOUT,
             text=True,
             env=runner_env(runner or {}),
+            start_new_session=True,
         )
         start = time.time()
         while proc.poll() is None:
             if j['id'] in CANCEL:
-                proc.terminate()
-                proc.wait()
+                stop_tree(proc)
                 raise Cancelled()
             if time.time() - start > timeout:
-                proc.kill()
-                proc.wait()
+                stop_tree(proc)
                 raise subprocess.TimeoutExpired(command, timeout)
             time.sleep(0.2)
+        stop_tree(proc)  # the agent exited: reap any children it left running
     return proc.returncode
+
+
+def _group_alive(pgid):
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def stop_tree(proc, grace=3):
+    # The runner leads its own process group, so signal the whole group: TERM, a bounded wait, then KILL.
+    pgid = proc.pid
+    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 5)):
+        try:
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError):
+            break
+        deadline = time.time() + wait
+        while time.time() < deadline and _group_alive(pgid):
+            if proc.poll() is None:
+                try:
+                    proc.wait(timeout=0.05)
+                except subprocess.TimeoutExpired:
+                    pass
+            else:
+                time.sleep(0.05)
+        if not _group_alive(pgid):
+            break
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 IGNORE_RE = re.compile(
@@ -348,6 +383,11 @@ def _execute(j):
         (out / 'envelope.json').write_text(json.dumps(j, indent=2))
         (out / 'TASK.md').write_text(j['instruction'])
         if runner['type'] == 'cli':
+            run_args = runner.get('args', [])
+            if j.get('web') and j.get('type') == 'research':
+                import local_agents
+
+                run_args = local_agents.web_args(runner, run_args)
             command = [runner['executable']] + [
                 s.replace('{input}', str(out / 'envelope.json'))
                 .replace('{output}', str(out / 'output'))
@@ -356,7 +396,7 @@ def _execute(j):
                     '{prompt}',
                     j['instruction'] + '\nRead envelope.json for full inputs. Write all deliverables to output/.',
                 )
-                for s in runner.get('args', [])
+                for s in run_args
             ]
             (out / 'output').mkdir(exist_ok=True)
             if j.get('parent_id'):
@@ -537,11 +577,14 @@ def _execute(j):
                     manifest_check = json.loads((source / 'manifest.json').read_text())
                 except ValueError as e:
                     raise ValueError('output/manifest.json is not valid JSON: ' + str(e))
+                check_manifest(manifest_check)
+                for sd in manifest_check['screens']:
+                    safe_path(source, sd['file'])  # every screen file must sit inside the output folder, before anything is copied or rewritten
                 shutil.copytree(source, folder, dirs_exist_ok=True)
                 manifest = manifest_check
                 variant['anchors_added'] = {}
-                for sd in manifest.get('screens', []):
-                    pf = folder / sd.get('file', '')
+                for sd in manifest['screens']:
+                    pf = safe_path(folder, sd['file'])
                     if pf.is_file() and not pf.is_symlink() and pf.suffix == '.html':
                         new, n = stamp_anchors(pf.read_text(errors='replace'))
                         if n:
@@ -559,7 +602,10 @@ def _execute(j):
                 # Free run: nothing was enforced, so record what the project's saved rules would have said (the rule-break log).
                 from contexts import current_context
 
-                saved = current_context(j['project_id'], ctx.get('profile_id'))
+                try:
+                    saved = get(ctx['id'])  # the version the run was launched against, not whatever was saved since
+                except (KeyError, ValueError):
+                    saved = current_context(j['project_id'], ctx.get('profile_id'))
                 variant['rule_breaks'] = dict(
                     context_id=saved['id'],
                     context_version=saved['version'],

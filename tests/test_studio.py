@@ -55,6 +55,25 @@ class StudioTest(unittest.TestCase):
   self.assertIn('--allow-all-tools',on['args']); self.assertIn('--model',on['args']); self.assertEqual(on['sandbox'],'bwrap'); self.assertIn('~/.copilot',on['sandbox_rw'])
   self.assertEqual([a for a in off['args'] if a.startswith('--allow')],['--allow-tool=write']); self.assertNotIn('--model',off['args']); self.assertIsNone(off['sandbox'])
   self.assertIn('COPILOT_GITHUB_TOKEN',on['env_allowlist'])
+ def test_web_args_per_agent_and_off_by_default(self):
+  fake=[{'id':a,'name':a,'supported':True,'executable':'/usr/bin/'+a} for a in ('codex','claude','copilot')]
+  with patch.object(local_agents,'discover',return_value=fake):
+   cfg={a:local_agents.configuration(a,'',sandbox=sb) for a in ('codex','claude','copilot') for sb in (True,)}
+   off={a:local_agents.configuration(a,'',sandbox=False) for a in ('claude',)}
+  for a,c in cfg.items(): self.assertFalse([x for x in c['args'] if 'search' in x.lower() or 'url' in x.lower() or 'WebFetch' in x], 'no web access by default: '+a)
+  self.assertEqual(local_agents.web_args(cfg['codex'],cfg['codex']['args'])[0],'--search'); self.assertEqual(local_agents.web_args(cfg['codex'],cfg['codex']['args'])[1],'exec')
+  cl=local_agents.web_args(cfg['claude'],cfg['claude']['args']); self.assertEqual([a for a in cl if a.startswith('--allowedTools')][0].count('WebSearch'),1); self.assertIn('Bash(python3 *)',[a for a in cl if a.startswith('--allowedTools')][0])
+  cl2=local_agents.web_args(off['claude'],off['claude']['args']); self.assertEqual([a for a in cl2 if a.startswith('--allowedTools')],['--allowedTools=WebSearch,WebFetch'])
+  self.assertIn('--allow-all-urls',local_agents.web_args(cfg['copilot'],cfg['copilot']['args']))
+  with self.assertRaises(ValueError): local_agents.web_args({'agent':'opencode'},[])
+ def test_web_flag_only_applies_to_research_jobs(self):
+  p=s.allof('project')[0]; r=s.allof('runner')[0]
+  with patch.object(s,'enqueue'):
+   a=s.launch(dict(brief='What do people expect?',runner_ids=[r['id']],web=True),'research',p['id'])[0]
+   b=s.launch(dict(brief='What do people expect?',runner_ids=[r['id']]),'research',p['id'])[0]
+   g=s.launch(dict(brief='x',board_id=s.allof('board')[0]['id'],runner_ids=[r['id']],web=True),'generate_board',p['id'])[0]
+  self.assertTrue(a['web']); self.assertIn('WEB SEARCH IS ENABLED',a['instruction']); self.assertFalse(b['web']); self.assertNotIn('WEB SEARCH IS ENABLED',b['instruction'])
+  self.assertFalse(g['web']); self.assertNotIn('WEB SEARCH IS ENABLED',g['instruction'])
  def test_no_installed_agent(self):
   with patch.object(local_agents,'discover',return_value=[]):
    with self.assertRaises(ValueError):local_agents.configuration('codex','model')

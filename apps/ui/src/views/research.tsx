@@ -50,7 +50,7 @@ export function ResearchView() {
     if (busy) return; const brief = (document.getElementById('research-brief') as HTMLTextAreaElement).value.trim(); if (!brief) return toast('Enter a research question first');
     ui.set({ busy: true });
     try {
-      await api('research', { project_id: p.id, brief, sources: parseSources((document.getElementById('sources') as HTMLTextAreaElement).value), reference_ids: [...document.querySelectorAll<HTMLInputElement>('#research-refs input[name=references]:checked')].map((i) => i.value), runner_ids: [(document.getElementById('research-runner') as HTMLSelectElement).value], idempotency_key: uuid() });
+      await api('research', { project_id: p.id, brief, sources: parseSources((document.getElementById('sources') as HTMLTextAreaElement).value), reference_ids: [...document.querySelectorAll<HTMLInputElement>('#research-refs input[name=references]:checked')].map((i) => i.value), runner_ids: [(document.getElementById('research-runner') as HTMLSelectElement).value], web: (document.getElementById('research-web') as HTMLInputElement).checked, idempotency_key: uuid() });
       await refresh();
     } catch (e: any) { toast(e.message); } finally { ui.set({ busy: false }); }
   };
@@ -64,6 +64,7 @@ export function ResearchView() {
           <label className="mb-1.5 mt-3 block text-xs font-medium" htmlFor="sources">Source material · one URL or pasted excerpt per line</label><Textarea id="sources" rows={3} placeholder="https://…  (URLs are kept as supplied sources; nothing is fetched or verified for you)" />
           <div className="mb-1.5 mt-3 text-xs font-medium">Reference images (optional)</div><RefPicker id="research-refs" selected={[]} projectId={p.id} />
           <div className="mt-4 flex items-end justify-between gap-3"><div><label className="mb-1.5 block text-xs font-medium" htmlFor="research-runner">Research agent</label><select id="research-runner" className={cn(nativeSelect, 'w-auto')}>{enabledRunners().map((x) => <option key={x.id} value={x.id}>{x.name}{x.type === 'fixture' ? ' · template demo' : ''}</option>)}</select></div><Button className="primary" data-action="run-research" disabled={busy} onClick={run}><Ic name="spark" /> Run research</Button></div>
+          <label className="mt-3 flex items-start gap-2 text-xs" htmlFor="research-web"><input id="research-web" type="checkbox" className="mt-0.5" /><span><strong className="font-medium">Allow web search</strong> for this run. The agent searches and opens pages with its own tools, and every page it cites is listed as an agent-reported source (not verified). Screen generation never gets web access. Off by default.</span></label>
           <p className="mt-3 text-xs text-muted-foreground">Findings appear below automatically. Without sources, findings are labelled unverified.</p>
         </Panel>
         <div id="research-results"><Results pid={p.id} /></div>
