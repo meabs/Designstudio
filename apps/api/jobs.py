@@ -734,7 +734,8 @@ def _execute(j):
         event(j, 'failed', str(e))
 
 
-def chrome_screenshot(job_id, page, png, timeout=20, size=(720, 960)):
+def chrome_screenshot(job_id, page, png, timeout=60, size=(720, 960)):
+    # 60s: a cold Chrome on a busy machine often needs more than the old 20s, which left most thumbnails missing.
     # Headless Chrome spawns helper processes and can hang; run it in its own process group and kill the whole group on timeout,
     # then remove its throwaway profile so nothing is left behind.
     profile = f'/tmp/studio-chrome-{job_id}'

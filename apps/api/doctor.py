@@ -8,7 +8,7 @@ which contract stage passes or fails. Uses a temporary storage directory; never 
 import argparse, re, sys, tempfile, time, json
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import server as s, local_agents
+import server as s, local_agents, jobs
 
 def wait(jid, limit):
     end = time.time() + limit + 30
@@ -67,7 +67,7 @@ def main():
                 shots = []
                 for label, folder in (('src', src), ('mix', s.STORE / 'variants' / mixed['id'])):
                     png = Path(tmp.name) / f'{label}-{sid}.png'
-                    subprocess.run(['google-chrome', '--headless', '--no-sandbox', '--disable-gpu', '--hide-scrollbars', '--window-size=720,960', f'--user-data-dir={tmp.name}/chr-{label}-{sid}', f'--screenshot={png}', (folder / 'screens' / f'{sid}.html').as_uri()], capture_output=True, timeout=60); shots.append(png.read_bytes() if png.is_file() else None)
+                    jobs.chrome_screenshot(f'doctor-{label}-{sid}', folder / 'screens' / f'{sid}.html', png); shots.append(png.read_bytes() if png.is_file() else None)
                 same.append(shots[0] is not None and shots[0] == shots[1])
             print(f"== mix render check: mixed screens render identically to their sources = {same}"); ok = ok and not bad and all(same)
         else: ok = False
@@ -89,7 +89,7 @@ def main():
         import base64, subprocess, os
         word = 'PINEAPPLE-42'; html = Path(tmp.name) / 'ref.html'; png = Path(tmp.name) / 'ref.png'
         html.write_text(f'<body style="margin:0;width:700px;height:300px;background:#fffbe6;display:grid;place-items:center;font:700 64px sans-serif;color:#222">{word}</body>')
-        subprocess.run(['google-chrome', '--headless', '--no-sandbox', '--disable-gpu', '--window-size=700,300', f'--user-data-dir={tmp.name}/chr', f'--screenshot={png}', html.as_uri()], capture_output=True, timeout=60)
+        jobs.chrome_screenshot('doctor-ref', html, png, size=(700, 300))
         if not png.is_file(): print('\n== reference check: SKIPPED (Chrome unavailable to render the test image)')
         else:
             ref = s.add_reference(dict(project_id=p['id'], name='Heading text', note='Use the exact words shown in this image as the main heading of the first screen.', data=base64.b64encode(png.read_bytes()).decode()))
