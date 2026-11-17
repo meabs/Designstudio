@@ -734,11 +734,21 @@ def _execute(j):
         event(j, 'failed', str(e))
 
 
+def _chrome_bin():
+    # Prefer the real browser binary. Some environments put a CDP/debug wrapper earlier on PATH as
+    # `google-chrome` (shared profile + remote-debugging-port), which makes headless screenshots hang.
+    for name in ('google-chrome-stable', 'chromium-browser', 'chromium', 'google-chrome'):
+        found = shutil.which(name)
+        if found:
+            return found
+    return 'google-chrome'
+
+
 def chrome_screenshot(job_id, page, png, timeout=20, size=(720, 960)):
     # Headless Chrome spawns helper processes and can hang; run it in its own process group and kill the whole group on timeout,
     # then remove its throwaway profile so nothing is left behind.
     profile = f'/tmp/studio-chrome-{job_id}'
-    cmd = ['google-chrome', '--headless', '--no-sandbox', '--disable-gpu', '--hide-scrollbars', '--no-pdf-header-footer', f'--window-size={size[0]},{size[1]}', f'--user-data-dir={profile}', f'--screenshot={png}', page.as_uri()]
+    cmd = [_chrome_bin(), '--headless', '--no-sandbox', '--disable-gpu', '--hide-scrollbars', '--no-pdf-header-footer', f'--window-size={size[0]},{size[1]}', f'--user-data-dir={profile}', f'--screenshot={png}', page.as_uri()]
     try:
         p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except FileNotFoundError:

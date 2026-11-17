@@ -21,6 +21,7 @@ class HardeningTest(unittest.TestCase):
   except urllib.error.HTTPError as e: return e.code,json.loads(e.read() or b'null'),e.headers
  def test_health(self):
   code,body,_=self.call('/api/health'); self.assertEqual(code,200); self.assertTrue(body['ok']); self.assertIn('free_disk_mb',body)
+  self.assertTrue(body.get('storage_ok')); self.assertNotIn('storage',body)  # absolute path must not leak
  def test_rebinding_host_rejected_on_get_and_post(self):
   self.assertEqual(self.call('/api/state',headers={'Host':'evil.example:5173'})[0],403)
   self.assertEqual(self.call('/api/project',{'name':'x'},headers={'Host':'evil.example','Origin':'http://evil.example'})[0],403)

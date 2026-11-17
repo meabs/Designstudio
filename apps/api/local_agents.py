@@ -15,6 +15,22 @@ CLAUDE_RUN_TOOLS=['Bash(python3 *)','Bash(python *)','Bash(node *)','Bash(mkdir 
 
 def discover():
  result=[]
+ # Cursor Agent installs both `cursor-agent` and `agent` as the same CLI; prefer the explicit name.
+ cursor_exe=shutil.which('cursor-agent') or shutil.which('agent')
+ if cursor_exe:
+  models=[]; source='Cursor Agent default (Auto)'
+  try:
+   p=subprocess.run([cursor_exe,'--list-models'],capture_output=True,text=True,timeout=12)
+   if p.returncode==0:
+    found=[]
+    for ln in p.stdout.splitlines():
+     tok=(ln.strip().split() or [''])[0].strip('`-*,')
+     if tok and len(tok)<80 and not tok.lower().startswith(('model','available','usage','id','name','---')):
+      found.append(tok)
+    if found:
+     models=found[:40]; source='cursor-agent --list-models'
+  except (OSError,subprocess.TimeoutExpired): pass
+  result.append(dict(id='cursor',name='Cursor Agent',executable=cursor_exe,models=models,model_source=source,supported=True))
  for name in ['codex','claude','opencode','gemini','copilot','aider']:
   executable=shutil.which(name)
   if not executable: continue
@@ -51,10 +67,26 @@ def configuration(agent,model,sandbox=None):
   # Non-interactive prompt mode. Inside our filesystem sandbox the agent may run tools anywhere it can see (it can only write the job folder);
   # without it, only file writes are pre-approved and paths stay limited to the working folder. Never asks questions, never self-updates.
   args=['--prompt','{prompt}','--silent','--no-ask-user','--no-auto-update']+(['--allow-all-tools','--allow-all-paths'] if sandbox else ['--allow-tool=write'])+(['--model',model] if model else [])
+ elif agent=='cursor':
+  # Headless print mode. --force covers shell/tools that would need approval (same idea as Claude's allowedTools inside our sandbox).
+  # When our bwrap sandbox is on, disable Cursor's nested sandbox; otherwise keep Cursor's own sandbox. Job cwd is the job folder.
+  args=['--print','--force','--trust','--workspace','.','--sandbox','disabled' if sandbox else 'enabled']+(['--model',model] if model else [])+['{prompt}']
  else: args=['run']+(['--model',model] if model else [])+['{prompt}']
- env=['PATH','HOME','USER','LANG','LC_ALL','TERM','TMPDIR','SHELL','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']+{'codex':['CODEX_HOME','OPENAI_API_KEY'],'claude':['CLAUDE_CONFIG_DIR','ANTHROPIC_API_KEY'],'opencode':['OPENCODE_CONFIG'],'copilot':['COPILOT_HOME','COPILOT_GITHUB_TOKEN','GH_TOKEN','GITHUB_TOKEN']}.get(agent,[])
+ env=['PATH','HOME','USER','LANG','LC_ALL','TERM','TMPDIR','SHELL','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']+{
+  'codex':['CODEX_HOME','OPENAI_API_KEY'],
+  'claude':['CLAUDE_CONFIG_DIR','ANTHROPIC_API_KEY'],
+  'opencode':['OPENCODE_CONFIG'],
+  'copilot':['COPILOT_HOME','COPILOT_GITHUB_TOKEN','GH_TOKEN','GITHUB_TOKEN'],
+  'cursor':['CURSOR_API_KEY','CURSOR_AUTH_TOKEN','CURSOR_CONFIG_DIR'],
+ }.get(agent,[])
  real=os.path.dirname(os.path.realpath(installed['executable']))
- rw={'codex':['~/.codex'],'claude':['~/.claude','~/.claude.json'],'opencode':['~/.config/opencode','~/.local/share/opencode'],'copilot':['~/.copilot']}.get(agent,[])
+ rw={
+  'codex':['~/.codex'],
+  'claude':['~/.claude','~/.claude.json'],
+  'opencode':['~/.config/opencode','~/.local/share/opencode'],
+  'copilot':['~/.copilot'],
+  'cursor':['~/.cursor','~/.local/share/cursor-agent','~/.config/cursor'],
+ }.get(agent,[])
  return dict(name=installed['name']+' / '+(model or 'agent default'),type='cli',agent=agent,model=model,executable=installed['executable'],args=args,timeout=900,env_allowlist=env,auto_retries=0,sandbox='bwrap' if sandbox else None,sandbox_ro=[real],sandbox_rw=rw)
 
 def web_args(runner, args):

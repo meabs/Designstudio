@@ -647,7 +647,8 @@ def health():
         jobs=counts,
         free_disk_mb=shutil.disk_usage(core.STORE).free // 1_000_000,
         bwrap=bwrap_ok(),
-        storage=str(core.STORE),
+        # Do not return the absolute storage path: health is unauthenticated on the studio port.
+        storage_ok=core.STORE.is_dir(),
     )
 
 
