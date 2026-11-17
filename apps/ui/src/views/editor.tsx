@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSel, live, live as liveUrl, api, refresh } from '@/lib/store';
+import { useSel, useUi, live, live as liveUrl, api, refresh } from '@/lib/store';
+import { hasPhoneView } from '@/lib/frame';
 import { editStore, frame, elOf, select, commit, styleOf, undo, redo, canUndo, canRedo, resetElements, discard, replay, payload, countEdits, logOf, hexOf, isLeaf, isVoid, docOrder, siblingId, type Pos } from '@/lib/edit';
 import { useCurrent, navigate, boardPath } from '@/lib/router';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,7 @@ export function moveGroup(v: string, screen: string, ids: string[], target: stri
 export function EditCanvas({ v, screen, fr, width }: { v: any; screen: string; fr: { w: number; h: number }; width: number }) {
   const ed = useEditor(); const ref = useRef<HTMLIFrameElement>(null); const [hover, setHover] = useState(''); const k = width / fr.w;
   const [drop, setDrop] = useState<{ id: string; pos: Pos } | null>(null); const drag = useRef<{ x: number; y: number; id: string; on: boolean; free: boolean; base: Record<string, { l: number; t: number }> } | null>(null);
+  const [inline, setInline] = useState('');
   const size = useRef<{ x: number; y: number; w: number; h: number; dir: string; id: string } | null>(null);
   useEffect(() => { frame.doc = null; frame.version = v.id; frame.screen = screen; }, [v.id, screen]);
   const onLoad = () => { const d = ref.current?.contentDocument || null; frame.doc = d; frame.version = v.id; frame.screen = screen; if (d) { replay(d, logOf(v.id, screen)); editStore.set((s) => ({ tick: s.tick + 1, sel: s.sel.filter((i) => !!elOf(i)) })); } };
@@ -68,6 +70,21 @@ export function EditCanvas({ v, screen, fr, width }: { v: any; screen: string; f
     if (!e.shiftKey && editStore.get().sel.length > 1 && editStore.get().sel.includes(d.id)) select([d.id]); // plain click inside a multi-selection narrows it
   };
 
+  /* Double-click a text element to type on the canvas. Enter or clicking away keeps the text, Escape cancels. */
+  const startInline = (id: string) => {
+    const el = elOf(id); const doc = frame.doc; if (!el || !doc || !isLeaf(el)) return false;
+    const before = el.textContent ?? ''; let cancelled = false; select([id]); setInline(id);
+    try { el.setAttribute('contenteditable', 'plaintext-only'); if (el.contentEditable !== 'plaintext-only') el.setAttribute('contenteditable', 'true'); } catch { el.setAttribute('contenteditable', 'true'); }
+    const noNav = (ev: Event) => ev.preventDefault(); // a click on a link while typing must not navigate the frame
+    const key = (ev: KeyboardEvent) => { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); el.blur(); } else if (ev.key === 'Escape') { ev.preventDefault(); cancelled = true; el.blur(); } };
+    const done = () => {
+      el.removeEventListener('keydown', key); doc.removeEventListener('click', noNav, true); el.removeAttribute('contenteditable'); setInline(''); ref.current?.blur(); window.focus(); // give the keys (Ctrl+Z) back to the editor
+      const now = (el.textContent ?? '').replace(/\n/g, ' '); if (cancelled) el.textContent = before; else if (now !== before) commit(v.id, screen, { design_id: id, text: now }); else el.textContent = before;
+    };
+    el.addEventListener('keydown', key); doc.addEventListener('click', noNav, true); el.addEventListener('blur', done, { once: true });
+    el.focus(); const r = doc.createRange(); r.selectNodeContents(el); const s = doc.defaultView!.getSelection(); s?.removeAllRanges(); s?.addRange(r);
+    return true;
+  };
   const sizeDown = (dir: string, id: string) => (e: React.PointerEvent) => {
     e.stopPropagation(); const el = elOf(id); if (!el) return; (e.currentTarget as Element).setPointerCapture(e.pointerId);
     const r = el.getBoundingClientRect(); size.current = { x: e.clientX, y: e.clientY, w: r.width, h: r.height, dir, id };
@@ -100,9 +117,9 @@ export function EditCanvas({ v, screen, fr, width }: { v: any; screen: string; f
   return (
     <div className="editcanvas relative overflow-hidden rounded border bg-white" data-edit-canvas style={{ width, height: Math.round(fr.h * k) }}>
       <iframe ref={ref} key={`${v.id}:${screen}`} title="Editable screen" sandbox="allow-same-origin" src={live(v, screen)} onLoad={onLoad} tabIndex={-1}
-        style={{ width: fr.w, height: fr.h, border: 0, transformOrigin: '0 0', transform: `scale(${k})`, background: '#fff', pointerEvents: 'none' }} />
-      <div className="absolute inset-0 cursor-default touch-none" data-edit-surface onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => setHover('')}
-        onDoubleClick={() => { document.getElementById('edit-text')?.focus(); }}>
+        style={{ width: fr.w, height: fr.h, border: 0, transformOrigin: '0 0', transform: `scale(${k})`, background: '#fff', pointerEvents: inline ? 'auto' : 'none' }} />
+      <div className="absolute inset-0 cursor-default touch-none" data-edit-surface style={{ pointerEvents: inline ? 'none' : undefined }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => setHover('')}
+        onDoubleClick={(e) => { const hit = at(e); if (hit && startInline(hit.id)) return; document.getElementById('edit-text')?.focus(); }}>
         {hov && <div className="pointer-events-none absolute border border-sky-500/70" style={{ left: hov.x, top: hov.y, width: hov.w, height: hov.h }} />}
         {sels.map(({ id, b }) => <div key={id} className="pointer-events-none absolute border-2 border-sky-600" data-edit-selection={id} style={{ left: b!.x, top: b!.y, width: b!.w, height: b!.h }}>{sels.length === 1 && <span className="absolute -top-5 left-0 whitespace-nowrap rounded bg-sky-600 px-1.5 text-[10px] text-white">{id}</span>}</div>)}
         {sels.length === 1 && (!isVoid(elOf(sels[0].id)) || elOf(sels[0].id)?.tagName === 'IMG') ? ([['e', 'cursor-ew-resize', { left: sels[0].b!.x + sels[0].b!.w - 5, top: sels[0].b!.y + sels[0].b!.h / 2 - 5 }], ['s', 'cursor-ns-resize', { left: sels[0].b!.x + sels[0].b!.w / 2 - 5, top: sels[0].b!.y + sels[0].b!.h - 5 }], ['se', 'cursor-nwse-resize', { left: sels[0].b!.x + sels[0].b!.w - 5, top: sels[0].b!.y + sels[0].b!.h - 5 }]] as const).map(([dir, cur, pos]) =>
@@ -125,12 +142,16 @@ const inputCls = 'h-7 rounded-md border bg-background px-2 text-[13px]';
 const Tool = ({ label, icon, onClick, disabled, attr }: { label: string; icon: any; onClick: () => void; disabled?: boolean; attr: string }) =>
   <Button size="icon-xs" variant="outline" aria-label={label} title={label} disabled={disabled} {...{ [attr]: '' }} onClick={onClick}><Ic name={icon} size={13} /></Button>;
 
-function ColorField({ label, prop, cs, tokens, set }: { label: string; prop: string; cs: CSSStyleDeclaration; tokens: string[]; set: (p: string, v: string) => void }) {
-  const val = hexOf(cs.getPropertyValue(prop));
+type Tok = [string, string]; // [token name, #hex]
+const tokenValue = ([name, hex]: Tok) => `var(--${name}, ${hex})`; // the fallback keeps the page correct even where the token is not declared
+function ColorField({ label, prop, cs, tokens, set }: { label: string; prop: string; cs: CSSStyleDeclaration; tokens: Tok[]; set: (p: string, v: string) => void }) {
+  const val = hexOf(cs.getPropertyValue(prop)); const norm = (h: string) => h.toLowerCase().replace(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/, '#$1$1$2$2$3$3');
+  const used = tokens.find(([, hex]) => norm(hex) === val.toLowerCase()); const pick = (hex: string) => { const t = tokens.find(([, h]) => norm(h) === hex.toLowerCase()); set(prop, t ? tokenValue(t) : hex); };
   return (
     <Row k={label}>
-      {tokens.slice(0, 6).map((t) => <button key={t} type="button" title={`Token ${t}`} aria-label={`Use ${t}`} className="size-4 rounded border" style={{ background: t }} onClick={() => set(prop, t)} />)}
-      <input type="color" aria-label={label} data-edit-prop={prop} value={val} onChange={(e) => set(prop, e.target.value)} className="size-7 cursor-pointer rounded border bg-background p-0.5" />
+      {used && <span data-edit-token-in-use className="mr-1 text-[11px] text-muted-foreground">{used[0]}</span>}
+      {tokens.slice(0, 6).map((t) => <button key={t[0]} type="button" data-edit-token={t[0]} title={`Token ${t[0]} ${t[1]}`} aria-label={`Use token ${t[0]}`} className="size-4 rounded border" style={{ background: t[1] }} onClick={() => set(prop, tokenValue(t))} />)}
+      <input type="color" aria-label={label} data-edit-prop={prop} value={val} onChange={(e) => pick(e.target.value)} className="size-7 cursor-pointer rounded border bg-background p-0.5" />
     </Row>
   );
 }
@@ -174,13 +195,14 @@ function FromScreen({ v, screen, ids }: { v: any; screen: string; ids: string[] 
 }
 
 export function EditPanel({ v, tokens }: { v: any; tokens: Record<string, any> }) {
-  const ed = useEditor(); const { r, b } = useCurrent(); const [busy, setBusy] = useState(false);
+  const ed = useEditor(); const { r, b } = useCurrent(); const [busy, setBusy] = useState(false); const view = useUi((s) => s.reviewView); const both = hasPhoneView(b);
+  const scoped = both && ed.scope === 'view'; useEffect(() => { editStore.set({ at: scoped ? view : '' }); return () => editStore.set({ at: '' }); }, [scoped, view]);
   void ed.tick;
   const screen = frame.screen; const ids = ed.sel.filter((i) => !!elOf(i)); const el = elOf(ids[0] || ''); const n = countEdits(v.id); const one = ids.length === 1;
   const cs = el && frame.doc ? frame.doc.defaultView!.getComputedStyle(el) : null;
   const set = (p: string, val: string) => styleOf(v.id, screen, ids, { [p]: val });
   const px = (p: string) => Math.round(parseFloat(cs!.getPropertyValue(p)) || 0);
-  const colors = Object.values(tokens || {}).filter((x) => /^#[0-9a-f]{3,8}$/i.test(String(x))).map(String);
+  const colors: Tok[] = Object.entries(tokens || {}).filter(([k, x]) => /^[\w-]+$/.test(k) && /^#[0-9a-f]{3,8}$/i.test(String(x))).map(([k, x]) => [k, String(x)]);
   const touched = logOf(v.id, screen).some((o) => !o.op && ids.includes(o.design_id || ''));
   const add = (kind: 'text' | 'button') => { if (!ids.length) return; commit(v.id, screen, { op: 'insert', target_id: docOrder(ids).at(-1)!, position: 'after', kind }); };
   const fileRef = useRef<HTMLInputElement>(null); const replaceRef = useRef<HTMLInputElement>(null);
@@ -212,7 +234,12 @@ export function EditPanel({ v, tokens }: { v: any; tokens: Record<string, any> }
         <span className="mx-0.5 w-px bg-border" />
         <Button size="xs" variant={ed.free ? 'default' : 'outline'} aria-pressed={ed.free} data-edit-free title="Drag to offset an element from its place instead of reordering (or hold Ctrl while dragging)" onClick={() => editStore.set({ free: !ed.free })}>Free move</Button>
       </div>
-      {!el || !cs ? <p className="text-xs text-muted-foreground">Click an element to edit it. Shift-click selects several; drag to reorder (hold Alt to drop inside); drag the handles to resize. Changes stay in a draft until you save them as a new version; the original is never modified.</p> : (
+      {both && <div className="mb-2 flex items-center gap-1.5 text-xs" role="group" aria-label="Where style changes apply">
+        <span className="text-muted-foreground">Style changes apply to</span>
+        {(['all', 'view'] as const).map((m) => <button key={m} type="button" data-edit-scope={m} aria-pressed={ed.scope === m} className={'h-6 rounded-md border px-2 ' + (ed.scope === m ? 'bg-foreground text-background' : 'bg-background')} onClick={() => editStore.set({ scope: m })}>{m === 'all' ? 'All widths' : view === 'm' ? 'Mobile only' : 'Desktop only'}</button>)}
+      </div>}
+      {scoped && <p className="mb-2 text-[11px] text-muted-foreground" data-edit-scope-note>{view === 'm' ? 'Applies at 600px wide and below.' : 'Applies above 600px wide.'} Switch the phone/desktop view above the canvas to check the other width.</p>}
+      {!el || !cs ? <p className="text-xs text-muted-foreground">Click an element to edit it. Shift-click selects several; drag to reorder (hold Alt to drop inside); drag the handles to resize; double-click text to type. Changes stay in a draft until you save them as a new version; the original is never modified.</p> : (
         <div className="flex flex-col">
           <p className="mb-1.5 text-xs text-muted-foreground">{one ? `<${el.tagName.toLowerCase()}> · ${ids[0]}` : `${ids.length} elements selected`}</p>
           {one && isLeaf(el) && <textarea id="edit-text" data-edit-text aria-label="Text" rows={2} className="mb-1.5 w-full rounded-md border bg-background p-2 text-[13px]" value={el.textContent ?? ''} onChange={(e) => commit(v.id, screen, { design_id: ids[0], text: e.target.value })} />}

@@ -234,7 +234,7 @@ def seed():
             from local_agents import configuration, discover
 
             for a in discover():
-                if a['id'] in ('claude', 'codex') and a['supported']:
+                if a['id'] in ('claude', 'codex', 'copilot') and a['supported']:
                     save('runner', dict(id=uid(), enabled=True, **configuration(a['id'], '')))
     if not allof('project'):
         p = project({'name': 'Credit Card Application', 'description': 'A clearer path to your next everyday card.'})

@@ -74,6 +74,16 @@ class StudioTest(unittest.TestCase):
    g=s.launch(dict(brief='x',board_id=s.allof('board')[0]['id'],runner_ids=[r['id']],web=True),'generate_board',p['id'])[0]
   self.assertTrue(a['web']); self.assertIn('WEB SEARCH IS ENABLED',a['instruction']); self.assertFalse(b['web']); self.assertNotIn('WEB SEARCH IS ENABLED',b['instruction'])
   self.assertFalse(g['web']); self.assertNotIn('WEB SEARCH IS ENABLED',g['instruction'])
+ def test_cited_urls_are_checked_without_touching_private_addresses(self):
+  import research
+  src=[dict(id='a',url='https://ok.example/x',verification='unverified_claim'),dict(id='b',url='https://gone.example/y',verification='unverified_claim'),dict(id='c',url='https://supplied.example',verification='source_supplied_by_user'),dict(id='d',title='no url',verification='unverified_claim')]
+  fnd=[dict(id='f1',source_ids=['b']),dict(id='f2',source_ids=['a']),dict(id='f3',source_ids=['c'])]
+  seen=[]
+  def fake(u): seen.append(u); return 'not_found' if 'gone' in u else 'reachable'
+  research.check_urls(src,fnd,fetch=fake)
+  self.assertEqual(sorted(seen),['https://gone.example/y','https://ok.example/x'],'only agent-reported URLs are fetched')
+  self.assertEqual([s.get('reachable') for s in src],['reachable','not_found',None,None]); self.assertEqual(fnd[0]['broken_sources'],['b']); self.assertNotIn('broken_sources',fnd[1])
+  for u in ['http://127.0.0.1:1/','http://localhost/','http://10.0.0.5/','http://169.254.169.254/latest/','http://[::1]/','file:///etc/passwd','ftp://x/y']: self.assertEqual(research.fetch_status(u),'skipped',u)
  def test_no_installed_agent(self):
   with patch.object(local_agents,'discover',return_value=[]):
    with self.assertRaises(ValueError):local_agents.configuration('codex','model')

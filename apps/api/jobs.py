@@ -7,7 +7,7 @@ from core import LOCK, allof, get, log, safe_path, save, uid
 from fixture import ALLOWED_OUTPUT, fixture_tokens, render_screen
 from references import snapshot_references
 from regions import diff_regions, region_revise, stamp_anchors
-from research import sanitize_research
+from research import check_urls, sanitize_research
 from validation import check_manifest, validate
 import core
 
@@ -447,6 +447,8 @@ def _execute(j):
                     result = sanitize_research(json.loads(rf.read_text()), j.get('sources', []))
                 except ValueError as e:
                     raise ValueError('Invalid research output: ' + str(e))
+                if j.get('web'):
+                    check_urls(result['sources'], result['findings'])
             for finding in result['findings']:
                 finding.setdefault('id', uid())
                 finding.setdefault('selected', False)

@@ -181,6 +181,38 @@ class EditTest(unittest.TestCase):
         with self.assertRaises(ValueError): s.draft_save('missing', {'0': [{}]})
         with self.assertRaises(ValueError): s.draft_save(vid, [])
 
+    def test_token_colours_and_off_token_colours(self):
+        tokens = self.ctx['tokens']; name, val = next((k, v) for k, v in tokens.items() if __import__('re').fullmatch(r'#[0-9a-fA-F]{6}', str(v)))
+        did = self.ids[0]
+        c = self.edit([dict(design_id=did, style={'color': f'var(--{name}, {val})'})])
+        self.assertIn(f'var(--{name}, {val})', (s.STORE / 'variants' / c['id'] / 'screens/0.html').read_text())
+        chk = [x for x in c['validation'] if x['check'] == 'Manual edit colours']; self.assertEqual(chk[0]['outcome'], 'pass')
+        c = self.edit([dict(design_id=did, style={'background-color': val})]); self.assertEqual([x['outcome'] for x in c['validation'] if x['check'] == 'Manual edit colours'], ['pass'], 'a hex that equals a token counts')
+        c = self.edit([dict(design_id=did, style={'color': '#123457'})]); chk = [x for x in c['validation'] if x['check'] == 'Manual edit colours']
+        self.assertEqual(chk[0]['outcome'], 'review'); self.assertIn('#123457', chk[0]['evidence'])
+        c = self.edit([dict(design_id=did, style={'font-size': '20px'})]); self.assertFalse([x for x in c['validation'] if x['check'] == 'Manual edit colours'])
+        self.assertFalse([x for x in c['validation'] if x['outcome'] == 'fail' and x['check'].startswith('Token')])
+
+    def test_per_width_edits(self):
+        did = self.ids[0]; page = lambda c: (s.STORE / 'variants' / c['id'] / 'screens/0.html').read_text()
+        c = self.edit([dict(design_id=did, style={'font-size': '31px'}, at='m')])
+        t = page(c); self.assertIn('<style data-studio-edits>', t); self.assertIn('@media (max-width: 600px){[data-design-id="%s"]{font-size:31px !important}}' % did, t)
+        self.assertNotIn('font-size: 31px', t.split('<style data-studio-edits>')[0].split(f'data-design-id="{did}"')[-1][:60], 'not written inline')
+        self.assertEqual(c['changed_screens'], ['0']); self.assertIn(did, c['changed_regions']['0']['elements'])
+        self.assertTrue(all(x['outcome'] != 'fail' for x in c['validation'] if x['check'].startswith('Manual edit scope')), c['validation'])
+        self.assertTrue(any('mobile only' in x for x in c['changes']))
+        # merging into the existing block: same width, other width, other property, and a reset
+        c = self.edit([dict(design_id=did, style={'font-size': '31px'}, at='m'), dict(design_id=did, style={'color': '#123456'}, at='m'), dict(design_id=did, style={'font-size': '44px'}, at='d'), dict(design_id=did, style={'font-size': '30px'}, at='m')])
+        t = page(c); self.assertEqual(t.count('<style data-studio-edits>'), 1)
+        self.assertIn('max-width: 600px){[data-design-id="%s"]{font-size:30px !important;color:#123456 !important}}' % did, t); self.assertIn('min-width: 601px', t)
+        with self.assertRaises(ValueError, msg='set then reset changes nothing'): self.edit([dict(design_id=did, style={'font-size': '31px'}, at='m'), dict(design_id=did, style={'font-size': ''}, at='m')])
+        # a child of a child keeps and edits the same block
+        c1 = self.edit([dict(design_id=did, style={'font-size': '31px'}, at='m')])
+        with patch.object(jobs, 'chrome_screenshot', return_value=False): c2 = s.manual_edit(c1['id'], {'0': [dict(design_id=did, style={'opacity': '0.5'}, at='m')]})
+        t = page(c2); self.assertEqual(t.count('<style data-studio-edits>'), 1); self.assertIn('font-size:31px !important;opacity:0.5 !important', t)
+        for bad in [dict(design_id=did, style={'color': 'red'}, at='x'), dict(design_id=did, text='hi', at='m'), dict(design_id='missing', style={'color': '#111111'}, at='m'), dict(design_id=did, style={'position': 'absolute'}, at='m'), dict(design_id=did, at='m')]:
+            with self.assertRaises(ValueError, msg=str(bad)): self.edit([bad])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -132,7 +132,7 @@ The chosen target is passed to every agent in the task text. Boards can have **2
 
 ## Web search in research
 
-On the Research page tick **Allow web search** to let the research agent search and open pages for that run. It is off by default and only applies to research, never to screen generation. Cited pages appear as sources with their URLs, marked as reported by the agent and unverified: open a source before you rely on it.
+On the Research page tick **Allow web search** to let the research agent search and open pages for that run. It is off by default and only applies to research, never to screen generation. Cited pages appear as sources with their URLs, marked as reported by the agent and unverified. The studio also checks that each link responds and shows "Link works", "Link not found" or "Link not checkable" (many sites block automated requests). Findings that cite a missing page are flagged. Open a source before you rely on it.
 
 ## Editing a screen directly
 
@@ -143,6 +143,9 @@ Pick the **Edit** tool (pencil, or press **E**) in Review. The screen becomes li
 - **Resize and free move.** A selected element has handles on its right, bottom and corner: drag one to set its width and height. Turn on **Free move** (or hold **Ctrl** while dragging) to offset an element from its normal place instead of reordering it. The flow around it does not change.
 - **Images.** **Image** adds a PNG or JPEG after the selection (large pictures are scaled down first). On a selected image you can edit its alt text and **Replace…** the picture.
 - **From another screen.** Open **Insert from another screen**, pick a screen and an element, and insert a copy after the selection. The studio copies it from the saved version. A copy is never the screen's primary action, so duplicating or inserting a primary button leaves the one-primary-action check as it was.
+- **Type on the canvas.** Double-click a text element to type in place. **Enter** or clicking away keeps it, **Escape** cancels.
+- **One width only.** On a board that targets both desktop and mobile, set **Style changes apply to** to *Mobile only* or *Desktop only* (it follows the phone/desktop view above the canvas). The change is saved as a width-specific rule, so the other width keeps its look. Switch the view to check both.
+- **Tokens.** The colour swatches are your project's tokens and write `var(--token, #hex)`, so a later token change reaches the element. A colour picked by hand that matches no token is listed in the Manual edit colours check for review.
 - **Undo.** **Ctrl+Z** undoes and **Ctrl+Shift+Z** redoes, per screen. **Discard** drops the whole draft.
 
 Press **Save as new version** to create a child version with a Manual edit check. It is pending like any revision: accept or revert it, compare it with its parent, or keep revising by pin. No agent runs and the original is never modified. Limits are listed in KNOWN_LIMITATIONS.md.

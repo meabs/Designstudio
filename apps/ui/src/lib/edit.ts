@@ -3,11 +3,11 @@
 import { createStore, api } from './store';
 
 export type Pos = 'before' | 'after' | 'inside';
-export type Op = { op?: 'delete' | 'duplicate' | 'move' | 'insert' | 'image' | 'component'; design_id?: string; target_id?: string; position?: Pos; kind?: 'text' | 'button' | 'image'; style?: Record<string, string>; text?: string;
+export type Op = { op?: 'delete' | 'duplicate' | 'move' | 'insert' | 'image' | 'component'; design_id?: string; target_id?: string; position?: Pos; kind?: 'text' | 'button' | 'image'; style?: Record<string, string>; text?: string; at?: 'd' | 'm';
   data_url?: string; alt?: string; source_screen?: string; source_id?: string; html?: string }; // html is browser-only: the studio copies the component from the saved version itself
 type Logs = Record<string, Record<string, Op[]>>; // version -> screen -> ops
 
-export const editStore = createStore({ sel: [] as string[], logs: {} as Logs, redo: {} as Logs, tick: 0, free: false });
+export const editStore = createStore({ sel: [] as string[], logs: {} as Logs, redo: {} as Logs, tick: 0, free: false, at: '' as '' | 'd' | 'm', scope: 'all' as 'all' | 'view' });
 export const frame: { doc: Document | null; version: string; screen: string } = { doc: null, version: '', screen: '' };
 
 const KEY = (v: string) => `ds-edit:${v}`;
@@ -62,6 +62,17 @@ export function paint(el: HTMLElement | null, e: { style?: Record<string, string
   for (const [k, v] of Object.entries(e.style || {})) { if (v === '') el.style.removeProperty(k); else el.style.setProperty(k, v); }
   if (e.text !== undefined && el.children.length === 0) el.textContent = e.text;
 }
+/* Width-specific styles: one generated block of media rules, the same format the studio writes (see apps/api/edits.py). */
+const AT = { m: ['max', 600], d: ['min', 601] } as const; const RULE = /@media \((max|min)-width: (\d+)px\)\{\[data-design-id="([^"]+)"\]\{([^}]*)\}\}/g;
+function scopedPaint(doc: Document, id: string, at: 'd' | 'm', style: Record<string, string>) {
+  let el = doc.querySelector('style[data-studio-edits]') as HTMLStyleElement | null; const rules = new Map<string, Record<string, string>>();
+  for (const m of (el?.textContent || '').matchAll(RULE)) { const d: Record<string, string> = {}; for (const part of m[4].split(';')) { const i = part.indexOf(':'); if (i > 0) d[part.slice(0, i).trim()] = part.slice(i + 1).replace('!important', '').trim(); } rules.set(`${m[1] === 'max' ? 'm' : 'd'}|${m[3]}`, d); }
+  const cur = rules.get(`${at}|${id}`) || {}; for (const [k, v] of Object.entries(style)) { if (v === '') delete cur[k]; else cur[k] = v; } rules.set(`${at}|${id}`, cur);
+  const out = [...rules.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).filter(([, d]) => Object.keys(d).length).map(([key, d]) => { const [a, rid] = key.split('|'); const [kind, px] = AT[a as 'm' | 'd']; return `@media (${kind}-width: ${px}px){[data-design-id="${rid}"]{${Object.entries(d).map(([k, v]) => `${k}:${v} !important`).join(';')}}}`; });
+  if (!out.length) { el?.remove(); return; }
+  if (!el) { el = doc.createElement('style'); el.setAttribute('data-studio-edits', ''); (doc.head || doc.documentElement).append(el); }
+  el.textContent = out.join('');
+}
 /** Apply one op to a document. Returns ids the selection should move to, if the op creates elements. */
 export function applyOp(doc: Document, op: Op): string[] | null {
   if (op.op === 'insert') {
@@ -80,7 +91,7 @@ export function applyOp(doc: Document, op: Op): string[] | null {
     demote(clone); place(doc, clone, t, op.position || 'after'); return [made[0]];
   }
   const el = q(doc, op.design_id || ''); if (!el) return null;
-  if (!op.op) { paint(el, op); return null; }
+  if (!op.op) { if (op.at && op.style) scopedPaint(doc, op.design_id || '', op.at, op.style); else paint(el, op); return null; }
   if (op.op === 'image') { if (el.tagName === 'IMG') { if (op.data_url) el.setAttribute('src', op.data_url); if (op.alt !== undefined) el.setAttribute('alt', op.alt); } return null; }
   if (op.op === 'delete') { el.remove(); return null; }
   if (op.op === 'duplicate') {
@@ -97,9 +108,11 @@ export function replay(doc: Document, ops: Op[]) { for (const o of ops) applyOp(
 const plain = (o: Op) => !o.op;
 export function commit(v: string, screen: string, op: Op) {
   const ops = [...logOf(v, screen)];
+  const at = editStore.get().at; if (plain(op) && op.style && !op.at && at) op = { ...op, at }; // "this width only": style changes become media rules
   if (plain(op)) { // merge into the trailing run of plain edits so a slider drag is one undo step per element
-    let i = ops.length - 1; while (i >= 0 && plain(ops[i]) && ops[i].design_id !== op.design_id) i--;
-    if (i >= 0 && plain(ops[i]) && ops[i].design_id === op.design_id) { ops[i] = { ...ops[i], style: { ...ops[i].style, ...op.style }, ...(op.text !== undefined ? { text: op.text } : {}) }; if (!Object.keys(ops[i].style || {}).length) delete ops[i].style; }
+    const same = (o: Op) => plain(o) && o.design_id === op.design_id && o.at === op.at;
+    let i = ops.length - 1; while (i >= 0 && plain(ops[i]) && !same(ops[i])) i--;
+    if (i >= 0 && same(ops[i])) { ops[i] = { ...ops[i], style: { ...ops[i].style, ...op.style }, ...(op.text !== undefined ? { text: op.text } : {}) }; if (!Object.keys(ops[i].style || {}).length) delete ops[i].style; }
     else ops.push(op);
   } else ops.push(op);
   setLog(v, screen, ops, []);

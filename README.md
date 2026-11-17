@@ -43,7 +43,7 @@ Design Studio puts that around the agents. Every run is a job with an **immutabl
 | **Guideline profiles** | Keep several named, separately versioned sets of `DESIGN.md`, rules and tokens per project, and run every agent under each to compare. |
 | **Bring your own files** | Import `DESIGN.md`, rules files and token files (JSON or CSS variables) from a folder or the browser. Review the draft, then save a version. No pasting. |
 | **Live visibility** | Watch each agent's progress, screens written, elapsed time and usage while it runs, with a time and cost estimate before you start. |
-| **Edit directly** | The **Edit** tool (E) puts the live screen in the review canvas. Click or shift-click elements, change text, colours, type, size, radius, padding, opacity and visibility (project tokens offered as swatches), drag to reorder, drag handles to resize, free-move an element by an offset, duplicate, delete, add text, a button or a PNG/JPEG image, replace an image, insert an element from another screen, with undo and redo. Drafts are kept in the browser and in the studio. Save as a new child version: no agent run, the parent is never modified, and checks, region diff and accept/revert apply as for any revision. |
+| **Edit directly** | The **Edit** tool (E) puts the live screen in the review canvas. Click or shift-click elements, change text, colours, type, size, radius, padding, opacity and visibility (project tokens offered as swatches), drag to reorder, drag handles to resize, free-move an element by an offset, duplicate, delete, add text, a button or a PNG/JPEG image, replace an image, insert an element from another screen, double-click text to type on the canvas, apply a style to one width only (desktop or mobile), with undo and redo. Colour swatches write project tokens, and hand-picked colours that match no token are flagged. Drafts are kept in the browser and in the studio. Save as a new child version: no agent run, the parent is never modified, and checks, region diff and accept/revert apply as for any revision. |
 | **Web research (opt-in)** | A per-run **Allow web search** switch on the Research page lets Claude Code, Codex or GitHub Copilot CLI use their own web tools. Every page they cite becomes a source with its URL, labelled agent-reported and unverified. Off by default, and screen generation never gets web access. |
 | **Pin, don't prompt** | Pin feedback on a screen element. Revisions can be limited to the pinned region, and the studio checks that nothing else changed. A revision is a new child version you accept or revert. |
 | **Audit on demand** | A manual audit runs accessibility checks (WCAG-referenced) plus checklists from **your own Markdown documents** (legal, design review). An optional agent reading of those documents is always labelled unverified. |
@@ -74,7 +74,7 @@ cd Designstudio
 make run        # builds the UI on first run, then starts the server
 ```
 
-Open <http://localhost:5173>. On first start the studio adds any installed **Claude Code** and **Codex** as runners; add others (OpenCode, GitHub Copilot CLI, which has been run end to end), or change models, under **Settings → Agents & models**. Without an agent installed there is nothing to generate with (set `STUDIO_SEED_FIXTURES=1` for offline template runners). Data lives in `storage/` (SQLite plus generated files).
+Open <http://localhost:5173>. On first start the studio adds any installed **Claude Code**, **Codex** and **GitHub Copilot CLI** as runners; add others (OpenCode, GitHub Copilot CLI, which has been run end to end), or change models, under **Settings → Agents & models**. Without an agent installed there is nothing to generate with (set `STUDIO_SEED_FIXTURES=1` for offline template runners). Data lives in `storage/` (SQLite plus generated files).
 
 **Single-file build (no Python or Node needed to run it):** `./packaging/build.sh` produces `dist/designstudio` for the platform you build on (PyInstaller cannot cross-compile). Running it starts the studio and opens your browser; data is kept in `~/.local/share/designstudio` (or the macOS/Windows equivalent). Chrome and your agent CLIs are still needed on the machine. Only the Linux build has been tested.
 
@@ -170,6 +170,7 @@ STUDIO_UNSAFE_TEST_RUNNERS=1 STUDIO_FOLDER_ROOTS=/tmp STUDIO_STORAGE=$(mktemp -d
 STUDIO_URL=http://localhost:5199 node tests/browser.mjs   # core workflow
 STUDIO_URL=http://localhost:5199 node tests/tools.mjs     # designer tools
 STUDIO_URL=http://localhost:5199 node tests/edit.mjs      # direct editing (needs STUDIO_SEED_FIXTURES=1 on the server)
+make e2e                                                  # direct editing, with its own disposable server; also runs in make check (skips if Playwright or Chrome is missing)
 ```
 
 CI runs `make check` on every push. Add a coss component with `cd apps/ui && npx shadcn@latest add @coss/<name>`.

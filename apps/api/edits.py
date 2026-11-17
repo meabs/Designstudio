@@ -114,6 +114,58 @@ POSITIONS = {'before', 'after', 'inside'}
 NEW_KINDS = {'text': ('p', 'New text'), 'button': ('button', 'Button')}
 
 
+# Width-specific edits live in one generated block of media rules (with !important, so they beat the element's own inline style):
+#   @media (max-width: 600px){[data-design-id="x"]{color:#fff !important}}   mobile only
+#   @media (min-width: 601px){...}                                            desktop only
+BREAKPOINT = 600
+EDIT_BLOCK_RE = re.compile(r'<style data-studio-edits>(.*?)</style>\n?', re.S)
+RULE_RE = re.compile(r'@media \((max|min)-width: (\d+)px\)\{\[data-design-id="([^"]+)"\]\{([^}]*)\}\}')
+SAFE_ID = re.compile(r'^[A-Za-z0-9_.:-]{1,100}$')
+AT = {'m': ('max', BREAKPOINT), 'd': ('min', BREAKPOINT + 1)}
+
+
+def strip_edit_block(text):
+    return EDIT_BLOCK_RE.sub('', text)
+
+
+def patch_responsive(text, did, style, at):
+    if at not in AT:
+        raise ValueError('Unknown width')
+    if not isinstance(style, dict) or not style:
+        raise ValueError('A width-specific edit needs a style')
+    if did not in element_spans(text):
+        raise ValueError(f'No element with id {did}')
+    if not SAFE_ID.match(did):
+        raise ValueError('That element id cannot be styled per width')
+    new = dict(clean_style(k, v) for k, v in style.items())
+    m = EDIT_BLOCK_RE.search(text)
+    rules = {}
+    for x in RULE_RE.finditer(m.group(1)) if m else []:
+        decl = {}
+        for d in x.group(4).split(';'):
+            if ':' in d:
+                k, v = d.split(':', 1)
+                decl[k.strip()] = v.replace('!important', '').strip()
+        rules[('m' if x.group(1) == 'max' else 'd', x.group(3))] = decl
+    cur = rules.setdefault((at, did), {})
+    for k, v in new.items():
+        if v == '':
+            cur.pop(k, None)
+        else:
+            cur[k] = v
+    out = []
+    for (a, rid), decl in sorted(rules.items()):
+        if decl:
+            kind, px = AT[a]
+            out.append(f'@media ({kind}-width: {px}px){{[data-design-id="{rid}"]{{' + ';'.join(f'{k}:{v} !important' for k, v in decl.items()) + '}}')
+    text = EDIT_BLOCK_RE.sub('', text)
+    if not out:
+        return text
+    block = '<style data-studio-edits>' + ''.join(out) + '</style>\n'
+    at_i = text.lower().rfind('</html>')
+    return (text[:at_i] + block + text[at_i:]) if at_i >= 0 else text + '\n' + block
+
+
 def used_ids(text):
     return {m.group(3) for m in ANY_ID_RE.finditer(text)}
 
@@ -334,7 +386,12 @@ def apply_edits(text, edits, assets=None):
             new_text = e.get('text')
             if style is None and new_text is None:
                 continue
-            text = patch_element(text, did, style, new_text)
+            if e.get('at'):
+                if new_text is not None:
+                    raise ValueError('Text cannot be set for one width only')
+                text = patch_responsive(text, did, style, e['at'])
+            else:
+                text = patch_element(text, did, style, new_text)
             t = set()
         else:
             raise ValueError('Unknown edit operation')
@@ -378,12 +435,41 @@ def describe(screen_title, edits):
         elif op == 'image':
             out.append(f'{screen_title} · {e["design_id"]}: ' + ('picture replaced' if e.get('data_url') else 'alt text'))
         else:
-            bits = [f'{k}: {v or "reset"}' for k, v in (e.get('style') or {}).items()]
+            where = {'m': ' (mobile only)', 'd': ' (desktop only)'}.get(e.get('at'), '')
+            bits = [f'{k}{where}: {v or "reset"}' for k, v in (e.get('style') or {}).items()]
             if e.get('text') is not None:
                 bits.append('text')
             if bits:
                 out.append(f'{screen_title} · {e["design_id"]}: ' + ', '.join(bits))
     return out
+
+
+COLOR_PROPS = ('color', 'background-color', 'border-color')
+NEUTRAL = {'transparent', 'inherit', 'initial', 'currentcolor', 'unset'}
+
+
+def hex_norm(v):
+    v = v.strip().lower()
+    m = re.fullmatch(r'#([0-9a-f]{3})', v)
+    return '#' + ''.join(c * 2 for c in m.group(1)) if m else v
+
+
+def colour_review(by_screen, tokens):
+    """Colours typed or picked by hand that are not project tokens. Token colours are written as var(--name, #hex) and are fine."""
+    known = {hex_norm(str(v)): k for k, v in (tokens or {}).items() if re.fullmatch(r'#[0-9a-fA-F]{3,8}', str(v))}
+    off, on = set(), set()
+    for edits in by_screen.values():
+        for e in edits:
+            for prop, val in ((e.get('style') or {}) if isinstance(e, dict) else {}).items():
+                if prop not in COLOR_PROPS or not val or val.lower() in NEUTRAL:
+                    continue
+                if val.startswith('var('):
+                    on.add(val)
+                elif hex_norm(val) in known:
+                    on.add(known[hex_norm(val)])
+                else:
+                    off.add(val.lower())
+    return sorted(off), len(on)
 
 
 def manual_edit(variant_id, by_screen, note=''):
@@ -435,13 +521,14 @@ def manual_edit(variant_id, by_screen, note=''):
             now = safe_path(folder, entry['file']).read_text(errors='replace')
             if was == now:
                 continue
-            d = diff_regions(was, now)
+            d = diff_regions(strip_edit_block(was), strip_edit_block(now))
+            d['elements'] = sorted(set(d['elements']) | {e['design_id'] for e in by_screen[sid] if isinstance(e, dict) and e.get('at') and e.get('design_id')})
             changed_regions[sid] = d
             allowed = set(scope.get(sid, {}).get('elements', []))
             allowed |= ancestors_of(was, allowed) | ancestors_of(now, allowed)  # moving or adding a child changes its containers too
             extra = [x for x in d['elements'] if x not in allowed]
             if any(isinstance(e, dict) and e.get('op') for e in by_screen[sid]):
-                d = dict(d, outside=outside_changed(was, now))
+                d = dict(d, outside=outside_changed(strip_edit_block(was), strip_edit_block(now)))
                 changed_regions[sid] = d
             validation.append(
                 dict(
@@ -454,6 +541,17 @@ def manual_edit(variant_id, by_screen, note=''):
                     ),
                 )
             )
+        off, n_tok = colour_review(by_screen, ctx.get('tokens'))
+        if off:
+            validation.append(
+                dict(
+                    check='Manual edit colours',
+                    outcome='review',
+                    evidence='Not a project token: ' + ', '.join(off[:8]) + '. Use a token swatch so a later token change reaches this element, or add the colour to the tokens.',
+                )
+            )
+        elif n_tok:
+            validation.append(dict(check='Manual edit colours', outcome='pass', evidence=f'{n_tok} colour change(s) use project tokens'))
         validation.append(
             dict(
                 check='Manual edit',
