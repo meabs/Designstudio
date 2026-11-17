@@ -132,6 +132,13 @@ The chosen target is passed to every agent in the task text. Boards can have **2
 
 ## Editing a screen directly
 
-Pick the **Edit** tool (pencil, or press **E**) in Review. The screen becomes live: hover to outline an element, click to select it. In the Design tab you can change its text (when it has no child elements), text colour, background, font size, weight, alignment, radius, padding, opacity and visibility. Your project's colour tokens appear as swatches. Changes show immediately and stay a draft.
+Pick the **Edit** tool (pencil, or press **E**) in Review. The screen becomes live: hover to outline an element, click to select it, shift-click to select several. Changes show immediately and stay a draft until you save. The draft is kept in this browser and in the studio, so it follows you to another browser.
 
-Press **Save as new version** to create a child version with a Manual edit check. It is pending like any revision: accept or revert it, compare it with its parent, or keep revising by pin. **Discard** drops the draft. No agent runs and the original is never modified. Limits are listed in KNOWN_LIMITATIONS.md.
+- **Style and text.** In the Design tab change text (on elements without children), text colour, background, font size, weight, alignment, width, height, radius, padding, opacity and visibility. Project colour tokens appear as swatches. With several elements selected, a style change applies to all.
+- **Layout.** Drag an element to reorder it: a green line shows where it will land (hold **Alt** to drop it inside the target). **Alt+↑/↓** moves it among its siblings, **Ctrl+D** duplicates, **Delete** removes, and **Text** / **Button** add a new block after the selection.
+- **Resize and free move.** A selected element has handles on its right, bottom and corner: drag one to set its width and height. Turn on **Free move** (or hold **Ctrl** while dragging) to offset an element from its normal place instead of reordering it. The flow around it does not change.
+- **Images.** **Image** adds a PNG or JPEG after the selection (large pictures are scaled down first). On a selected image you can edit its alt text and **Replace…** the picture.
+- **From another screen.** Open **Insert from another screen**, pick a screen and an element, and insert a copy after the selection. The studio copies it from the saved version. A copy is never the screen's primary action, so duplicating or inserting a primary button leaves the one-primary-action check as it was.
+- **Undo.** **Ctrl+Z** undoes and **Ctrl+Shift+Z** redoes, per screen. **Discard** drops the whole draft.
+
+Press **Save as new version** to create a child version with a Manual edit check. It is pending like any revision: accept or revert it, compare it with its parent, or keep revising by pin. No agent runs and the original is never modified. Limits are listed in KNOWN_LIMITATIONS.md.

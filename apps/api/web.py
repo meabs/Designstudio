@@ -8,7 +8,7 @@ from boards import blind_choice, conflict_preview, create_board, hidden_job_file
 from contexts import context, profile_create, profile_delete, profile_update, project, seed
 from core import LOCK, ROOT, SHARE_PORT, STARTED, allof, db, get, log, safe_path, save, setup_logging, uid
 from jobs import JOBQ, MAX_JOBS, job_progress, WORKERS, cancel_job, recover_jobs, retry_job, start_workers, stop_workers
-from edits import manual_edit
+from edits import draft_get, draft_save, manual_edit
 from prototypes import approve, mix_variants, set_aside, set_review_state
 from importer import parse_files, read_folder
 from audit import apply_style, audit_review, audit_variant, extract_style, launch_doc_review, read_review_folder
@@ -326,7 +326,7 @@ class Handler(SimpleHTTPRequestHandler):
             if origin and urlparse(origin).netloc != self.headers.get('Host'):
                 raise ValueError('Cross-origin request rejected')
             n = int(self.headers.get('Content-Length', 0))
-            if n > (8_000_000 if self.path.endswith('/reference-upload') else 1_000_000):
+            if n > (8_000_000 if self.path.endswith(('/reference-upload', '/draft-save', '/manual-edit')) else 1_000_000):
                 raise ValueError('Request too large')
             if not self.headers.get('Content-Type', '').startswith('application/json'):
                 raise ValueError('Content-Type must be application/json')
@@ -451,6 +451,10 @@ class Handler(SimpleHTTPRequestHandler):
                 result = blind_choice(d['board_id'], d.get('variant_id'), d.get('reason', ''))
             elif action == 'mix':
                 result = mix_variants(d['board_id'], d.get('picks'))
+            elif action == 'draft-save':
+                result = draft_save(d['variant_id'], d.get('logs'))
+            elif action == 'draft-get':
+                result = draft_get(d['variant_id'])
             elif action == 'manual-edit':
                 result = manual_edit(d['variant_id'], d.get('edits'), d.get('note', ''))
             elif action == 'share-create':
