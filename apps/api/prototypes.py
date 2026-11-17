@@ -109,7 +109,8 @@ def approve(variant_id, note=''):
 
 
 # ---- mixing: compose one new immutable version from screens of different versions ----
-LINK_RE = re.compile(r'(href|src|poster|action)\s*=\s*(["\'])([^"\']*)\2', re.I)
+# Quoted or unquoted attribute values: minified HTML such as <link rel=stylesheet href=../style.css> is valid and agents emit it.
+LINK_RE = re.compile(r'(?P<attr>href|src|poster|action)\s*=\s*(?:(?P<q>["\'])(?P<qv>[^"\']*)(?P=q)|(?P<uv>[^\s"\'>=`<]+))', re.I)
 
 
 def style_fingerprint(folder, page):
@@ -185,7 +186,8 @@ def mix_variants(board_id, picks):
             root = (core.STORE / 'variants' / src_id).resolve()
 
             def sub(m):
-                attr, q, link = m.groups()
+                attr, q = m.group('attr'), m.group('q') or ''
+                link = m.group('qv') if m.group('q') else m.group('uv')
                 if link.startswith(('#', 'data:', 'mailto:', 'tel:', 'http:', 'https:', '//')) or not link:
                     return m.group(0)
                 base = re.split(r'[?#]', link)[0]

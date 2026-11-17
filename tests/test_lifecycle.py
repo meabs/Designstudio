@@ -284,6 +284,17 @@ class LifecycleTest(unittest.TestCase):
   self.assertEqual((folder/'shared'/a['id']/'assets/theme.css').read_text(),'p{color:red}'); self.assertEqual((folder/'shared'/b['id']/'assets/theme.css').read_text(),'p{color:blue}')
   self.assertIn('1.html',p0)
   s.validate(folder,m['manifest'],[])
+ def test_mix_rewrites_unquoted_link_attributes(self):
+  # Agents (Copilot) emit minified HTML such as <link rel=stylesheet href=../style.css>; those links must follow the screen into the mix.
+  a,b=self.two()
+  for v in (a,b):
+   f=s.STORE/'variants'/v['id']; (f/'style.css').write_text('b{color:red}')
+   for sid in ('0','1','2'):
+    page=f/'screens'/f'{sid}.html'; page.write_text(page.read_text()+'<link rel=stylesheet href=../style.css><img src=../style.css alt=x>')
+  m=s.mix_variants(self.b['id'],{'0':a['id'],'1':b['id'],'2':b['id']}); folder=s.STORE/'variants'/m['id']
+  p0=(folder/'screens/0.html').read_text()
+  self.assertIn(f'href=../shared/{a["id"]}/style.css',p0); self.assertNotIn('href=../style.css',p0)
+  self.assertTrue((folder/'shared'/a['id']/'style.css').is_file())
  def test_mix_requires_every_screen_and_two_sources_from_this_board(self):
   a,b=self.two()
   with self.assertRaises(ValueError): s.mix_variants(self.b['id'],{'0':a['id'],'1':b['id']})
