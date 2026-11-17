@@ -162,7 +162,7 @@ function RunnerRow({ x, bwrap }: { x: any; bwrap: boolean }) {
   );
 }
 export function SettingsView() {
-  const data = useData(); const agents = useAgents(); const cfg = useConfig(); const [sel, setSel] = useState('');
+  const data = useData(); const all = useAgents(); const agents = all.filter((x) => x.supported); const cfg = useConfig(); const [sel, setSel] = useState('');
   const a = agents.find((x) => x.id === sel);
   const add = async () => { if (!sel) return toast('Choose an installed coding agent'); try { await api('local-runner', { agent: sel, model: (document.getElementById('local-model') as HTMLInputElement).value.trim() }); toast('Local agent configuration added'); await refresh(); } catch (e: any) { toast(e.message); } };
   return (
@@ -172,7 +172,7 @@ export function SettingsView() {
         <Note>Fixture runners work offline with no API key. Local execution uses each agent’s existing authentication. Model IDs come from local metadata when available; installation does not guarantee model access.</Note>
         <Panel title="Local coding agents" action={<Button variant="outline" size="sm" data-action="scan-agents" onClick={() => runAction('scan-agents')}><Ic name="refresh" size={13} /> Rescan installed</Button>}>
           <div className="grid gap-4 md:grid-cols-2">
-            <div><label className="text-xs font-medium" htmlFor="local-agent">Coding agent</label><select id="local-agent" value={sel} onChange={(e) => setSel(e.target.value)} className={cn(nativeSelect, 'mt-1.5')}><option value="">Choose an installed agent</option>{agents.map((x) => <option key={x.id} value={x.id} disabled={!x.supported}>{x.name}{x.supported ? '' : ' · adapter not available'}</option>)}</select><p id="agent-path" className="mt-1.5 text-xs text-muted-foreground">{a ? a.executable : `${agents.length} installed tools detected on PATH`}</p></div>
+            <div><label className="text-xs font-medium" htmlFor="local-agent">Coding agent</label><select id="local-agent" value={sel} onChange={(e) => setSel(e.target.value)} className={cn(nativeSelect, 'mt-1.5')}><option value="">Choose an installed agent</option>{agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><p id="agent-path" className="mt-1.5 text-xs text-muted-foreground">{a ? a.executable : `${agents.length} installed agent${agents.length === 1 ? '' : 's'} detected on PATH` + (all.length > agents.length ? ` (${all.length - agents.length} more found without an adapter, hidden)` : '')}</p></div>
             <div><label className="text-xs font-medium" htmlFor="local-model">Model</label><Input id="local-model" list="model-list" placeholder="Agent default, or enter a model ID" key={sel} className="mt-1.5" /><datalist id="model-list">{(a?.models || []).map((m: string) => <option key={m} value={m} />)}</datalist><p id="model-source" className="mt-1.5 text-xs text-muted-foreground">{a ? a.model_source : 'Select a coding agent to see locally available model information.'}</p></div>
           </div>
           <Button className="primary mt-4" data-action="add-local-runner" onClick={add}><Ic name="plus" size={13} /> Add runner configuration</Button>

@@ -74,7 +74,7 @@ cd Designstudio
 make run        # builds the UI on first run, then starts the server
 ```
 
-Open <http://localhost:5173>. On first start the studio adds any installed **Claude Code**, **Codex** and **GitHub Copilot CLI** as runners; add others (OpenCode, GitHub Copilot CLI, which has been run end to end), or change models, under **Settings → Agents & models**. Without an agent installed there is nothing to generate with (set `STUDIO_SEED_FIXTURES=1` for offline template runners). Data lives in `storage/` (SQLite plus generated files).
+Open <http://localhost:5173>. On first start the studio adds any installed **Claude Code**, **Codex** and **GitHub Copilot CLI** as runners; add OpenCode, or change models, under **Settings → Agents & models**. The agent list shows only tools that are installed on your PATH and that the studio can run, so tools without an adapter (Gemini CLI, Aider) are hidden. Without an agent installed there is nothing to generate with (set `STUDIO_SEED_FIXTURES=1` for offline template runners). Data lives in `storage/` (SQLite plus generated files).
 
 **Single-file build (no Python or Node needed to run it):** `./packaging/build.sh` produces `dist/designstudio` for the platform you build on (PyInstaller cannot cross-compile). Running it starts the studio and opens your browser; data is kept in `~/.local/share/designstudio` (or the macOS/Windows equivalent). Chrome and your agent CLIs are still needed on the machine. Only the Linux build has been tested.
 
