@@ -25,11 +25,11 @@ class CursorAgentTest(unittest.TestCase):
         self.assertTrue(found['cursor']['supported'])
         self.assertEqual(found['cursor']['name'], 'Cursor Agent')
 
-    def test_discover_falls_back_to_agent_symlink(self):
+    def test_generic_agent_name_is_not_treated_as_cursor(self):
         with patch.object(local_agents.shutil, 'which', side_effect=lambda n: '/home/u/.local/bin/agent' if n == 'agent' else None):
             with patch.object(local_agents.subprocess, 'run', side_effect=OSError):
                 found = {a['id']: a for a in local_agents.discover()}
-        self.assertEqual(found['cursor']['executable'], '/home/u/.local/bin/agent')
+        self.assertNotIn('cursor', found)  # a bare `agent` on PATH could be any program; only `cursor-agent` counts
 
     def test_configuration_print_force_trust_and_sandbox_toggle(self):
         with patch.object(local_agents, 'discover', return_value=self.fake()):
